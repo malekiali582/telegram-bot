@@ -102,7 +102,7 @@ export async function eat(
 
   return inTransaction(ctx.db, async (tx) => {
     const { versionId, config } = await ctx.config.effectiveAt(tx, now);
-    const player = await beginPlayerAction(tx, input.userId);
+    const player = await beginPlayerAction(tx, ctx, input.userId, now);
     if (player.banned) return { status: 'banned' };
     if (input.idempotencyKey && (await findTransactionByKey(tx, input.idempotencyKey))) {
       return { status: 'duplicate' };

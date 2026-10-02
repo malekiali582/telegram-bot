@@ -11,6 +11,7 @@ import {
 import { and, eq, sql } from 'drizzle-orm';
 import type { DomainContext } from './context.ts';
 import { DomainError } from './context.ts';
+import { settleCemetery, settleInterest } from './settlement.ts';
 
 export interface PlayerIdentityInput {
   platform: Platform;
@@ -117,16 +118,24 @@ export interface LockedPlayer {
 
 /**
  * First step of every player action: takes the player-wide lock (shared by all groups)
- * so concurrent actions for the same player run one after another.
- * Later steps add lazy settlement (interest, cemetery) here.
+ * so concurrent actions for the same player run one after another, then settles what
+ * is owed up to `now`: midnight interest (by effective time) and cemetery income.
+ * Every read or change of a balance therefore sees settled values.
  */
-export async function beginPlayerAction(tx: Tx, userId: number): Promise<LockedPlayer> {
+export async function beginPlayerAction(
+  tx: Tx,
+  ctx: DomainContext,
+  userId: number,
+  now: Date,
+): Promise<LockedPlayer> {
   const state = await lockPlayer(tx, userId);
   if (!state) throw new DomainError('unknown_player', `player ${userId} is not registered`);
   const [user] = await tx
     .select({ bannedAt: users.bannedAt })
     .from(users)
     .where(eq(users.id, userId));
+  await settleInterest(tx, ctx, state, now);
+  await settleCemetery(tx, ctx, userId, now);
   return {
     userId,
     level: state.level,

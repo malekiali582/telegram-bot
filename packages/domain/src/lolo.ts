@@ -47,7 +47,7 @@ export async function claimLolo(
 
   return inTransaction(ctx.db, async (tx) => {
     const { versionId, config } = await ctx.config.effectiveAt(tx, now);
-    const player = await beginPlayerAction(tx, input.userId);
+    const player = await beginPlayerAction(tx, ctx, input.userId, now);
     if (player.banned) return { status: 'banned' };
 
     const availableAt = await cooldownAvailableAt(tx, input.userId, 'lolo');

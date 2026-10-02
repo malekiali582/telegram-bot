@@ -23,7 +23,7 @@ export async function toolShop(
   const now = ctx.clock.now();
   return inTransaction(ctx.db, async (tx) => {
     const { config } = await ctx.config.effectiveAt(tx, now);
-    const player = await beginPlayerAction(tx, userId);
+    const player = await beginPlayerAction(tx, ctx, userId, now);
     const owned = await tx
       .select({ tool: ownedTools.toolKind })
       .from(ownedTools)
@@ -62,7 +62,7 @@ export async function buyTool(
   const now = ctx.clock.now();
   return inTransaction(ctx.db, async (tx) => {
     const { versionId, config } = await ctx.config.effectiveAt(tx, now);
-    const player = await beginPlayerAction(tx, input.userId);
+    const player = await beginPlayerAction(tx, ctx, input.userId, now);
     if (player.banned) return { status: 'banned' };
     if (input.idempotencyKey) {
       const previous = await findTransactionByKey(tx, input.idempotencyKey);
@@ -124,7 +124,7 @@ export async function equipTool(
 ): Promise<EquipToolResult> {
   const now = ctx.clock.now();
   return inTransaction(ctx.db, async (tx) => {
-    const player = await beginPlayerAction(tx, input.userId);
+    const player = await beginPlayerAction(tx, ctx, input.userId, now);
     if (player.banned) return { status: 'banned' };
     const [owned] = await tx
       .select({ tool: ownedTools.toolKind })

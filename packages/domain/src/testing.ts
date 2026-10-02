@@ -10,6 +10,7 @@ import { registerGroup } from './groups.ts';
 import { postTransaction, systemWalletId, userWallets } from './ledger.ts';
 import { pointsToCenti } from './money.ts';
 import { registerPlayer } from './players.ts';
+import { tehranMidnight } from './tehran.ts';
 import { buyTool } from './tools.ts';
 
 /** A clock the test moves by hand. */
@@ -212,4 +213,28 @@ export async function banPlayer(game: TestGame, userId: number, reason = 'آزم
     .update(users)
     .set({ bannedAt: game.clock.now(), banReason: reason })
     .where(eq(users.id, userId));
+}
+
+/** Instant of a Tehran wall-clock time, e.g. `tehranTime('2026-10-02', '23:59:59.999')`. */
+export function tehranTime(date: string, time = '00:00:00'): Date {
+  const [h = '0', m = '0', s = '0'] = time.split(':');
+  const ms = ((Number(h) * 60 + Number(m)) * 60 + Number(s)) * 1000;
+  return new Date(tehranMidnight(date).getTime() + Math.round(ms));
+}
+
+export async function treasuryOf(game: TestGame, userId: number): Promise<bigint> {
+  return (await userWallets(game.ctx.db, userId)).treasury.balance;
+}
+
+/** A valid five-story batch for `activeDate`. */
+export function ghostBatchInput(activeDate: string, batchId = `batch-${activeDate}`) {
+  return {
+    batchId,
+    activeDate,
+    timezone: 'Asia/Tehran',
+    stories: [1, 2, 3, 4, 5].map((n) => ({
+      id: `${batchId}-s${n}`,
+      text: `«متن ${n} از ${batchId}»`,
+    })),
+  };
 }
