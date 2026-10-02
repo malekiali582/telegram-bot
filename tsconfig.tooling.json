@@ -1,0 +1,12 @@
+{
+  "//": "Root-level tooling and cross-package acceptance tests. Emits only declarations into a git-ignored cache.",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": ".tsbuild/tooling",
+    "emitDeclarationOnly": true,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": ["vitest.config.ts", "tests/**/*.ts", "scripts/**/*.ts"]
+}
