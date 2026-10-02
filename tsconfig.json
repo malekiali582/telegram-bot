@@ -16,6 +16,9 @@
     },
     {
       "path": "./packages/database"
+    },
+    {
+      "path": "./packages/domain"
     }
   ]
 }

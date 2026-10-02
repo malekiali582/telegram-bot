@@ -52,20 +52,19 @@ describe(`ledger guards (${testBackend()})`, () => {
       .select()
       .from(ledgerEntries)
       .where(eq(ledgerEntries.transactionId, txId));
-    expect(entries.map((e) => [e.amount, e.balanceAfter]).sort()).toEqual(
-      [
-        [-150_000n, -150_000n],
-        [150_000n, 150_000n],
-      ].sort(),
-    );
+    const byWallet = new Map(entries.map((e) => [e.walletId, [e.amount, e.balanceAfter]]));
+    expect(byWallet.get(player.cashWalletId)).toEqual([150_000n, 150_000n]);
+    // system wallets keep no running balance (no hot row lock), so no balance_after
+    expect(byWallet.get(mintLolo)).toEqual([-150_000n, null]);
   });
 
-  it('keeps every wallet balance equal to the sum of its entries', async () => {
+  it('keeps every user/group wallet balance equal to the sum of its entries', async () => {
     const mismatches = await queryRows(
       t.db,
       sql`
       SELECT w.id FROM wallets w
       LEFT JOIN ledger_entries e ON e.wallet_id = w.id
+      WHERE w.kind <> 'system'
       GROUP BY w.id, w.balance
       HAVING w.balance <> coalesce(sum(e.amount), 0)`,
     );
@@ -87,7 +86,7 @@ describe(`ledger guards (${testBackend()})`, () => {
     await expect(mint(player.treasuryWalletId, 1n)).resolves.toBeTypeOf('number');
   });
 
-  it('never lets a user wallet go negative, while system wallets may', async () => {
+  it('never lets a user wallet go negative; system wallets total via their entries', async () => {
     const balance = await walletBalance(t.db, player.cashWalletId);
     const code = await codeOf(
       t.db.transaction((tx) =>
@@ -98,7 +97,12 @@ describe(`ledger guards (${testBackend()})`, () => {
       ),
     );
     expect(code).toBe(PG_ERROR.checkViolation);
-    expect(await walletBalance(t.db, mintLolo)).toBeLessThan(0n);
+    expect(await walletBalance(t.db, mintLolo)).toBe(0n);
+    const [minted] = await queryRows<{ total: string }>(
+      t.db,
+      sql`SELECT sum(amount)::text AS total FROM ledger_entries WHERE wallet_id = ${mintLolo}`,
+    );
+    expect(BigInt(minted?.total ?? '0')).toBeLessThan(0n);
   });
 
   it('forbids changing a balance directly or creating a wallet with money in it', async () => {

@@ -132,7 +132,10 @@ export const wallets = pgTable('wallets', {
   userId: ref('user_id'),
   groupId: ref('group_id'),
   systemCode: text('system_code'),
-  /** Read-only from application code: maintained by the ledger trigger. */
+  /**
+   * Read-only from application code: maintained by the ledger trigger for user and group
+   * wallets. Always 0 for system wallets, whose totals are the sum of their entries.
+   */
   balance: money('balance').notNull().default(0n),
   createdAt: instant('created_at').notNull().defaultNow(),
 });
@@ -157,8 +160,8 @@ export const ledgerEntries = pgTable('ledger_entries', {
   transactionId: ref('transaction_id').notNull(),
   walletId: ref('wallet_id').notNull(),
   amount: money('amount').notNull(),
-  /** Filled in by the ledger trigger. */
-  balanceAfter: money('balance_after').notNull().default(0n),
+  /** Wallet balance after this entry (set by the ledger trigger); null for system wallets. */
+  balanceAfter: money('balance_after'),
   createdAt: instant('created_at').notNull().defaultNow(),
 });
 

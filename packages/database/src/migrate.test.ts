@@ -27,7 +27,11 @@ async function query<R>(sql: string, params?: unknown[]): Promise<R[]> {
 describe(`migrations (${testBackend()})`, () => {
   it('loads migration files in order with stable checksums', () => {
     const migrations = loadMigrations();
-    expect(migrations.map((m) => m.version)).toEqual(['0001_init', '0002_guards']);
+    expect(migrations.map((m) => m.version)).toEqual([
+      '0001_init',
+      '0002_guards',
+      '0003_system_wallets_default_config',
+    ]);
     expect(checksum('a\r\nb')).toBe(checksum('a\nb'));
   });
 
@@ -35,7 +39,11 @@ describe(`migrations (${testBackend()})`, () => {
     const rows = await query<{ version: string }>(
       'SELECT version FROM schema_migrations ORDER BY version',
     );
-    expect(rows.map((r) => r.version)).toEqual(['0001_init', '0002_guards']);
+    expect(rows.map((r) => r.version)).toEqual([
+      '0001_init',
+      '0002_guards',
+      '0003_system_wallets_default_config',
+    ]);
     expect(await migrateDatabase(t)).toEqual({ applied: [] });
   });
 
