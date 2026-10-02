@@ -1,5 +1,6 @@
 import { randomInt } from 'node:crypto';
 import type { Database } from '@lulu/database';
+import type { PlatformId } from '@lulu/platform';
 import { ConfigProvider } from './config-service.ts';
 
 /** Source of the current instant. Injected so tests control time exactly. */
@@ -25,6 +26,8 @@ export interface DomainContext {
   clock: Clock;
   rng: Rng;
   config: ConfigProvider;
+  /** Platforms this deployment serves; shared content must fit all of them. */
+  platforms: readonly PlatformId[];
 }
 
 export function createDomainContext(
@@ -36,6 +39,7 @@ export function createDomainContext(
     clock: overrides.clock ?? systemClock,
     rng: overrides.rng ?? cryptoRng,
     config: overrides.config ?? new ConfigProvider(),
+    platforms: overrides.platforms ?? ['telegram'],
   };
 }
 

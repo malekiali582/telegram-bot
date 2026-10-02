@@ -25,8 +25,12 @@ export default defineConfig(({ mode }) => {
       include: ['{apps,packages}/*/src/**/*.test.ts', 'tests/**/*.test.ts', 'scripts/**/*.test.ts'],
       environment: 'node',
       globalSetup: ['tests/setup/postgres-global-setup.ts'],
+      reporters: ['default', './tests/setup/strict-reporter.ts'],
       // Money and concurrency tests use their own databases; keep files isolated.
       pool: 'forks',
+      // Each PGlite database is a full PostgreSQL in WebAssembly (hundreds of MB);
+      // one worker per CPU core exhausts memory on large machines and crashes workers.
+      maxWorkers: 6,
       testTimeout: 30_000,
       hookTimeout: 60_000,
     },

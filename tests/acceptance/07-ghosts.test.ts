@@ -158,13 +158,22 @@ describe(`acceptance 7 — «شنیدم» (${testBackend()})`, () => {
     await attachEncounterMessage(game.ctx, { encounterId: ghost.encounterId, messageId });
     return { owner, ghost };
   }
-  const reply = (userId: number, messageId: string | null, groupId = groupA) =>
-    hearGhost(game.ctx, {
+  /** «شنیدم» sent in `inGroup`, replying to `messageId` of chat `messageChat` (default: the same chat). */
+  const reply = (
+    userId: number,
+    messageId: string | null,
+    opts: { inGroup?: number; messageChat?: string; fromBot?: boolean } = {},
+  ) => {
+    const inGroup = opts.inGroup ?? groupA;
+    return hearGhost(game.ctx, {
       userId,
+      groupId: inGroup,
       platform: 'telegram',
-      chatId: `chat-${groupId}`,
+      replyChatId: messageId === null ? null : (opts.messageChat ?? `chat-${inGroup}`),
       replyToMessageId: messageId,
+      replyFromThisBot: opts.fromBot ?? true,
     });
+  };
 
   it('rewards only the owner, only once, with the fear fixed when it was found', async () => {
     const { owner, ghost } = await ghostWithMessage('m-1');
@@ -181,8 +190,25 @@ describe(`acceptance 7 — «شنیدم» (${testBackend()})`, () => {
     const { owner } = await ghostWithMessage('m-2');
     expect(await reply(owner, null)).toEqual({ status: 'no_reply' });
     expect(await reply(owner, 'not-a-ghost')).toEqual({ status: 'not_a_ghost' });
-    expect(await reply(owner, 'm-2', groupB)).toEqual({ status: 'not_a_ghost' }); // same id, other chat
+    expect(await reply(owner, 'm-2', { inGroup: groupB })).toEqual({ status: 'not_a_ghost' }); // same id, other chat
     expect(await fearOf(owner)).toBe(0);
+  });
+
+  it('ignores replies from another group and forwarded copies of the ghost', async () => {
+    const { owner } = await ghostWithMessage('m-6');
+    // cross-chat reply sent in group B to the original ghost message in group A
+    expect(await reply(owner, 'm-6', { inGroup: groupB, messageChat: `chat-${groupA}` })).toEqual({
+      status: 'wrong_group',
+    });
+    // a forwarded copy is a new message, sent by whoever forwarded it
+    expect(await reply(owner, 'fwd-1', { fromBot: false })).toEqual({ status: 'not_a_ghost' });
+    expect(await reply(owner, 'fwd-2', { inGroup: groupB, fromBot: false })).toEqual({
+      status: 'not_a_ghost',
+    });
+    // even a reply carrying the original id does not count unless it is the bot's message
+    expect(await reply(owner, 'm-6', { fromBot: false })).toEqual({ status: 'not_a_ghost' });
+    expect(await fearOf(owner)).toBe(0);
+    expect((await reply(owner, 'm-6')).status).toBe('ok');
   });
 
   it('accepts the answer until 24 h after finding it, not at 24 h', async () => {

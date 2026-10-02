@@ -17,3 +17,7 @@ export * from './cemetery.ts';
 export * from './treasury.ts';
 export * from './ghost-batches.ts';
 export * from './ghosts.ts';
+export * from './city.ts';
+export * from './group-lifecycle.ts';
+export * from './leaderboard.ts';
+export * from './admin.ts';

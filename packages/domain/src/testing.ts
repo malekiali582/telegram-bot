@@ -1,5 +1,5 @@
 import type { CurseKind, FoodKind, ToolKind } from '@lulu/config';
-import { curses, huntingGrounds, inventory, playerState, users } from '@lulu/database';
+import { adminUsers, curses, huntingGrounds, inventory, playerState, users } from '@lulu/database';
 import type { TestDatabase } from '@lulu/database/testing';
 import { createTestDatabase } from '@lulu/database/testing';
 import { and, eq, sql } from 'drizzle-orm';
@@ -7,7 +7,8 @@ import { ensureDefaultConfig } from './config-service.ts';
 import type { Clock, DomainContext, Rng } from './context.ts';
 import { createDomainContext } from './context.ts';
 import { registerGroup } from './groups.ts';
-import { postTransaction, systemWalletId, userWallets } from './ledger.ts';
+import { groupBloodBankWallet, postTransaction, systemWalletId, userWallets } from './ledger.ts';
+import { claimLolo } from './lolo.ts';
 import { pointsToCenti } from './money.ts';
 import { registerPlayer } from './players.ts';
 import { tehranMidnight } from './tehran.ts';
@@ -237,4 +238,67 @@ export function ghostBatchInput(activeDate: string, batchId = `batch-${activeDat
       text: `«متن ${n} از ${batchId}»`,
     })),
   };
+}
+
+/** A group whose platform chat id the test knows (for migration tests). */
+export async function newGroupWithChat(
+  game: TestGame,
+  title = 'گروه آزمایشی',
+): Promise<{ groupId: number; chatId: string }> {
+  const chatId = `-100${nextPlatformId++}`;
+  const { groupId } = await registerGroup(game.ctx, {
+    platform: 'telegram',
+    platformChatId: chatId,
+    title,
+  });
+  return { groupId, chatId };
+}
+
+export async function createAdminUser(
+  game: TestGame,
+  role: 'owner' | 'admin' = 'admin',
+): Promise<number> {
+  const [row] = await game.ctx.db
+    .insert(adminUsers)
+    .values({ username: `admin${nextPlatformId++}`, passwordHash: 'not-a-real-hash', role })
+    .returning({ id: adminUsers.id });
+  if (!row) throw new Error('admin insert returned nothing');
+  return row.id;
+}
+
+/** `count` new players, each with a successful lolo in the group (active population). */
+export async function activeMembers(
+  game: TestGame,
+  groupId: number,
+  count: number,
+): Promise<number[]> {
+  const ids: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const userId = await newPlayer(game);
+    const result = await claimLolo(game.ctx, { userId, groupId });
+    if (result.status !== 'ok') throw new Error(`lolo failed: ${result.status}`);
+    ids.push(userId);
+  }
+  return ids;
+}
+
+/** Puts points straight into a group's blood bank (test setup only). */
+export async function fundBloodBank(
+  game: TestGame,
+  groupId: number,
+  points: number,
+): Promise<void> {
+  await game.ctx.db.transaction(async (tx) => {
+    const bank = await groupBloodBankWallet(tx, groupId);
+    const amount = pointsToCenti(points);
+    await postTransaction(tx, {
+      kind: 'test_grant',
+      effectiveAt: game.clock.now(),
+      groupId,
+      entries: [
+        { walletId: await systemWalletId(tx, 'adjust:admin'), amount: -amount },
+        { walletId: bank.id, amount },
+      ],
+    });
+  });
 }

@@ -1,14 +1,12 @@
 import { createHash } from 'node:crypto';
 import { GAME_TIME_ZONE } from '@lulu/config';
+import { maxGhostStoryLength } from '@lulu/platform';
 import { ghostBatches, ghostStories, inTransaction } from '@lulu/database';
 import { and, desc, eq, inArray, lte } from 'drizzle-orm';
 import { z } from 'zod';
 import type { DomainContext } from './context.ts';
 import { lockKey } from './players.ts';
 import { isValidDate, tehranDate } from './tehran.ts';
-
-/** Telegram allows 4096 characters per message; leave room for the frame around the story. */
-export const MAX_STORY_LENGTH = 3_500;
 
 const batchSchema = z.strictObject({
   batchId: z
@@ -38,10 +36,19 @@ export type GhostBatchValidation =
 
 /**
  * A nightly batch is accepted only with exactly `batchSize` (5) stories, each with a
- * unique id and non-empty text. Anything else is rejected as a whole, so a partial
+ * unique id and non-empty text no longer than every enabled platform can deliver. Anything else is rejected as a whole, so a partial
  * file can never replace the live batch.
  */
-export function validateGhostBatch(input: unknown, batchSize = 5): GhostBatchValidation {
+export interface GhostBatchLimits {
+  batchSize: number;
+  /** From the enabled platforms' message limits (see maxGhostStoryLength). */
+  maxStoryLength: number;
+  /** Named in the error so the owner knows which platform is the constraint. */
+  lengthDecidedBy?: string;
+}
+
+export function validateGhostBatch(input: unknown, limits: GhostBatchLimits): GhostBatchValidation {
+  const { batchSize, maxStoryLength } = limits;
   const parsed = batchSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -59,8 +66,9 @@ export function validateGhostBatch(input: unknown, batchSize = 5): GhostBatchVal
     if (seen.has(s.id)) errors.push(`stories.${i}.id: duplicate id «${s.id}»`);
     seen.add(s.id);
     if (s.text === '') errors.push(`stories.${i}.text: empty`);
-    if (s.text.length > MAX_STORY_LENGTH) {
-      errors.push(`stories.${i}.text: ${s.text.length} characters, limit ${MAX_STORY_LENGTH}`);
+    if (s.text.length > maxStoryLength) {
+      const by = limits.lengthDecidedBy ? ` (${limits.lengthDecidedBy})` : '';
+      errors.push(`stories.${i}.text: ${s.text.length} characters, limit ${maxStoryLength}${by}`);
     }
   });
   if (errors.length > 0) return { ok: false, errors };
@@ -95,7 +103,12 @@ export async function importGhostBatch(
 ): Promise<ImportGhostBatchResult> {
   const now = ctx.clock.now();
   const { config } = await ctx.config.effectiveAt(ctx.db, now);
-  const validation = validateGhostBatch(input, config.ghosts.batchSize);
+  const { limit, decidedBy } = maxGhostStoryLength(ctx.platforms);
+  const validation = validateGhostBatch(input, {
+    batchSize: config.ghosts.batchSize,
+    maxStoryLength: limit,
+    lengthDecidedBy: decidedBy,
+  });
   if (!validation.ok) return { status: 'invalid', errors: validation.errors };
   const batch = validation.batch;
   const hash = contentHash(batch);

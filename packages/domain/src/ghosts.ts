@@ -234,6 +234,8 @@ export type HeardResult =
   /** «شنیدم» typed without replying to a message: show guidance only. */
   | { status: 'no_reply' }
   | { status: 'not_a_ghost' }
+  /** A reply to a ghost of another group's city. */
+  | { status: 'wrong_group' }
   | { status: 'not_owner' }
   | { status: 'already_heard' }
   | { status: 'expired' }
@@ -241,26 +243,48 @@ export type HeardResult =
 
 /**
  * «شنیدم» as a reply to the ghost message. Only the ghost's owner is rewarded, only
- * once, and only before the deadline. Switching the live batch never invalidates an
+ * once, and only before the deadline, and only as a reply to the original ghost message
+ * in the chat where it was posted (never another group or a forwarded copy). Switching the live batch never invalidates an
  * encounter: the text and reward were stored with it.
  */
 export async function hearGhost(
   ctx: DomainContext,
-  input: { userId: number; platform: Platform; chatId: string; replyToMessageId: string | null },
+  input: {
+    userId: number;
+    /** Group of the chat the «شنیدم» was sent in (resolved through chat-id history). */
+    groupId: number;
+    platform: Platform;
+    /** Chat of the replied-to message (see ReplyTarget.chatId). */
+    replyChatId: string | null;
+    replyToMessageId: string | null;
+    /**
+     * Whether the replied-to message was sent by this bot. A forwarded copy of a ghost
+     * is a message by whoever forwarded it, so it never counts.
+     */
+    replyFromThisBot: boolean;
+  },
 ): Promise<HeardResult> {
-  if (input.replyToMessageId === null) return { status: 'no_reply' };
+  if (input.replyToMessageId === null || input.replyChatId === null) return { status: 'no_reply' };
+  if (!input.replyFromThisBot) return { status: 'not_a_ghost' };
   const now = ctx.clock.now();
   const [found] = await ctx.db
-    .select({ id: ghostEncounters.id, userId: ghostEncounters.userId })
+    .select({
+      id: ghostEncounters.id,
+      userId: ghostEncounters.userId,
+      groupId: ghostEncounters.groupId,
+    })
     .from(ghostEncounters)
     .where(
       and(
         eq(ghostEncounters.platform, input.platform),
-        eq(ghostEncounters.messageChatId, input.chatId),
+        eq(ghostEncounters.messageChatId, input.replyChatId),
         eq(ghostEncounters.messageId, input.replyToMessageId),
       ),
     );
   if (!found) return { status: 'not_a_ghost' };
+  // The ghost belongs to the city it was found in; a reply from another group (for
+  // example via a cross-chat reply) never counts. A migrated group keeps its id.
+  if (found.groupId !== input.groupId) return { status: 'wrong_group' };
   if (found.userId !== input.userId) return { status: 'not_owner' };
 
   return inTransaction(ctx.db, async (tx) => {

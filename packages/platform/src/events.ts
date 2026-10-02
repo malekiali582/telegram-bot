@@ -36,6 +36,12 @@ interface EventBase {
 }
 
 export interface ReplyTarget {
+  /**
+   * Chat the replied-to message belongs to. Usually the current chat; differs for
+   * replies to messages from another chat (Telegram `external_reply`), e.g. a message
+   * posted before the group was migrated to a supergroup.
+   */
+  chatId: string;
   messageId: string;
   /** `null` when the replied-to message has no personal sender (channel post, anonymous admin). */
   sender: Sender | null;

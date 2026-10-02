@@ -81,12 +81,24 @@ describe(`acceptance 8 — batch validation (${testBackend()})`, () => {
       await activateDueBatches(game.ctx);
       const result = await importBatch(input);
       expect(result.status).toBe('invalid');
-      expect(validateGhostBatch(input).ok).toBe(false);
+      expect(validateGhostBatch(input, { batchSize: 5, maxStoryLength: 3_500 }).ok).toBe(false);
       at(DAY2, '00:00:01');
       await activateDueBatches(game.ctx);
       expect(await activeKeys()).toEqual(['live']);
     },
   );
+
+  it('limits story length by the enabled platforms (Telegram: 4096 − frame)', async () => {
+    const atLimit = ghostBatchInput(DAY2, 'long');
+    atLimit.stories[0]!.text = 'ل'.repeat(3_500);
+    expect(await importBatch(atLimit)).toMatchObject({ status: 'imported' });
+    const tooLong = ghostBatchInput(DAY3, 'longer');
+    tooLong.stories[0]!.text = 'ل'.repeat(3_501);
+    expect(await importBatch(tooLong)).toEqual({
+      status: 'invalid',
+      errors: ['stories.0.text: 3501 characters, limit 3500 (telegram)'],
+    });
+  });
 
   it('imports idempotently and refuses conflicting or retroactive batches', async () => {
     expect(await importBatch(ghostBatchInput(DAY2, 'b'))).toMatchObject({ status: 'imported' });
@@ -170,8 +182,10 @@ describe(`acceptance 8 — switching batches (${testBackend()})`, () => {
       await hearGhost(game.ctx, {
         userId: owner,
         platform: 'telegram',
-        chatId: 'chat',
+        groupId: group,
+        replyChatId: 'chat',
         replyToMessageId: '77',
+        replyFromThisBot: true,
       }),
     ).toMatchObject({ status: 'ok', fearReward: 10 });
     // the retired batch and its stories are kept
