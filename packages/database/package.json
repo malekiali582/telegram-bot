@@ -1,0 +1,42 @@
+{
+  "name": "@lulu/database",
+  "version": "0.0.0",
+  "private": true,
+  "description": "اسکیمای PostgreSQL، migrationها، کلاینت (pg/PGlite)، helper تراکنش و قفل، و ابزار تست",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@lulu/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./pglite": {
+      "@lulu/source": "./src/pglite.ts",
+      "types": "./dist/pglite.d.ts",
+      "default": "./dist/pglite.js"
+    },
+    "./embedded": {
+      "@lulu/source": "./src/embedded.ts",
+      "types": "./dist/embedded.d.ts",
+      "default": "./dist/embedded.js"
+    },
+    "./testing": {
+      "@lulu/source": "./src/testing.ts",
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    }
+  },
+  "files": [
+    "dist",
+    "migrations"
+  ],
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@types/pg": "^8.23.1",
+    "embedded-postgres": "^18.4.0-beta.17"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.3",
+    "pg": "^8.23.1"
+  }
+}
