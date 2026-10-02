@@ -1,5 +1,18 @@
 {
   "//": "Solution file: every workspace package is added to `references` when it is created.",
   "files": [],
-  "references": [{ "path": "./tsconfig.tooling.json" }]
+  "references": [
+    {
+      "path": "./tsconfig.tooling.json"
+    },
+    {
+      "path": "./packages/platform"
+    },
+    {
+      "path": "./packages/i18n"
+    },
+    {
+      "path": "./packages/config"
+    }
+  ]
 }

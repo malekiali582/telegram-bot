@@ -8,5 +8,16 @@
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["vitest.config.ts", "tests/**/*.ts", "scripts/**/*.ts"]
+  "include": ["vitest.config.ts", "tests/**/*.ts", "scripts/**/*.ts"],
+  "references": [
+    {
+      "path": "./packages/config"
+    },
+    {
+      "path": "./packages/i18n"
+    },
+    {
+      "path": "./packages/platform"
+    }
+  ]
 }
