@@ -27,17 +27,21 @@ export async function bootstrapDatabase(
   return handle;
 }
 
-/** Runs `cleanup` once on SIGINT/SIGTERM, then exits. */
-export function onShutdown(cleanup: () => Promise<void>, log: Logger): void {
+/**
+ * Runs `cleanup` once on SIGINT/SIGTERM, then exits. Returns a trigger for a fatal
+ * stop from inside (exit code 1, so a process supervisor restarts the service).
+ */
+export function onShutdown(cleanup: () => Promise<void>, log: Logger): (reason: string) => void {
   let shuttingDown = false;
-  const handler = (signal: string) => {
+  const handler = (reason: string, exitCode: number) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    log.info('shutting down', { signal });
+    log.info('shutting down', { reason });
     cleanup()
       .catch((err: unknown) => log.error('shutdown failed', { error: err }))
-      .finally(() => process.exit(0));
+      .finally(() => process.exit(exitCode));
   };
-  process.on('SIGINT', () => handler('SIGINT'));
-  process.on('SIGTERM', () => handler('SIGTERM'));
+  process.on('SIGINT', () => handler('SIGINT', 0));
+  process.on('SIGTERM', () => handler('SIGTERM', 0));
+  return (reason) => handler(reason, 1);
 }

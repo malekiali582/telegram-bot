@@ -25,7 +25,8 @@
     "dev": "node --conditions=@lulu/source --import tsx scripts/dev.ts",
     "bot:start": "node apps/bot/dist/main.js",
     "worker:start": "node apps/worker/dist/main.js",
-    "dev:grant": "node --conditions=@lulu/source --import tsx scripts/dev-grant.ts"
+    "dev:grant": "node --conditions=@lulu/source --import tsx scripts/dev-grant.ts",
+    "dev:doctor": "node --conditions=@lulu/source --import tsx scripts/dev-doctor.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

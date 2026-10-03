@@ -139,6 +139,17 @@ const polling = await startPolling(
     log,
   ),
   log,
+  {
+    onFatal: (_err, code) => {
+      process.stderr.write(
+        code === 409
+          ? '\n❌ برنامهٔ دیگری با همین توکن پیام‌های ربات را می‌گیرد (409 Conflict).\n' +
+              '   پنجرهٔ دیگری از «npm run dev» یا هر برنامهٔ دیگری که با این توکن اجرا شده را ببندید.\n'
+          : '\n❌ دریافت پیام از تلگرام متوقف شد. خطای بالا را ببینید.\n',
+      );
+      void shutdown(1);
+    },
+  },
 );
 
 process.stdout.write(
@@ -146,14 +157,17 @@ process.stdout.write(
     '',
     `✅ ربات @${tg.username} روشن است (حالت توسعه، long polling).`,
     `   دیتابیس: PostgreSQL محلی در ${join(process.cwd(), DEV_DIR)} — پورت ${dev.DEV_DB_PORT}`,
-    '   در تلگرام به ربات /start بدهید یا آن را به یک گروه تستی اضافه کنید.',
+    `   در تلگرام به همین ربات (@${tg.username}) /start بدهید یا آن را به یک گروه تستی اضافه کنید.`,
+    level === 'debug' || level === 'trace'
+      ? '   لاگ debug روشن است: مسیر هر پیام از دریافت تا ارسال در ترمینال می‌آید.'
+      : '   برای دیدن مسیر هر پیام از دریافت تا ارسال، در .env بگذارید: LOG_LEVEL=debug',
     '   برای خاموش کردن: Ctrl + C',
     '',
   ].join('\n'),
 );
 
 let stopping = false;
-const shutdown = async () => {
+async function shutdown(exitCode = 0) {
   if (stopping) return;
   stopping = true;
   process.stdout.write('\nدر حال خاموش کردن…\n');
@@ -161,7 +175,7 @@ const shutdown = async () => {
   await worker.stop().catch(() => {});
   await handle.close().catch(() => {});
   await postgres.stop().catch(() => {});
-  process.exit(0);
-};
+  process.exit(exitCode);
+}
 process.on('SIGINT', () => void shutdown());
 process.on('SIGTERM', () => void shutdown());

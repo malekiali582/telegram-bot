@@ -68,7 +68,7 @@ export async function processEvent(deps: BotDeps, event: IncomingEvent): Promise
         return [send(conversation(event.chat, event.platform), T.groupWelcome, { reply: false })];
       });
     case 'member_change':
-      if (event.status !== 'left') return 'ignored';
+      if (event.status !== 'left') return ignored(deps, event, 'member joined');
       return inUpdate(deps, event, async (ctx) => {
         const userId = await findUserIdByIdentity(
           ctx.db,
@@ -128,25 +128,39 @@ async function inUpdate(
   event: IncomingEvent,
   handle: (ctx: DomainContext) => Promise<Reply[]>,
 ): Promise<ProcessOutcome> {
-  return inTransaction(deps.ctx.db, async (tx) => {
+  const result = await inTransaction(deps.ctx.db, async (tx) => {
     const fresh = await tx
       .insert(processedUpdates)
       .values({ platform: event.platform, updateId: event.updateId })
       .onConflictDoNothing()
       .returning({ updateId: processedUpdates.updateId });
-    if (fresh.length === 0) return 'duplicate' as const;
+    if (fresh.length === 0) return { outcome: 'duplicate' as const, outboxIds: [] };
 
     const ctx: DomainContext = { ...deps.ctx, db: tx };
     const replies = await handle(ctx);
     const now = ctx.clock.now();
+    const outboxIds: number[] = [];
     for (const reply of replies) {
-      await enqueue(tx, event.platform, reply.item, {
-        notBefore: now,
-        ...(reply.onSent ? { onSent: reply.onSent } : {}),
-      });
+      outboxIds.push(
+        await enqueue(tx, event.platform, reply.item, {
+          notBefore: now,
+          ...(reply.onSent ? { onSent: reply.onSent } : {}),
+        }),
+      );
     }
-    return 'processed' as const;
+    return { outcome: 'processed' as const, outboxIds };
   });
+  // Logged after commit, so the ids are rows the sender can actually see.
+  deps.log.debug(
+    result.outcome === 'duplicate' ? 'duplicate update skipped' : 'replies queued in outbox',
+    { updateId: event.updateId, type: event.type, outboxIds: result.outboxIds },
+  );
+  return result.outcome;
+}
+
+function ignored(deps: BotDeps, event: IncomingEvent, reason: string): 'ignored' {
+  deps.log.debug('event ignored', { updateId: event.updateId, type: event.type, reason });
+  return 'ignored';
 }
 
 async function liveRole(deps: BotDeps, chatId: string, userId: string): Promise<MemberRole> {
@@ -160,9 +174,18 @@ async function liveRole(deps: BotDeps, chatId: string, userId: string): Promise<
 
 async function processText(deps: BotDeps, event: TextMessageEvent): Promise<ProcessOutcome> {
   // Bots, edits and forwards never trigger game actions (and never earn «لولو»).
-  if (event.isEdited || event.isForwarded || event.sender?.isBot) return 'ignored';
+  if (event.isEdited) return ignored(deps, event, 'edited message');
+  if (event.isForwarded) return ignored(deps, event, 'forwarded message');
+  if (event.sender?.isBot) return ignored(deps, event, 'sent by a bot');
   const command = parseCommand(event.text, { botUsername: deps.botUsername });
-  if (!command) return 'ignored';
+  // Only the length is logged: message text is user content.
+  if (!command) return ignored(deps, event, `not a command (${event.text.length} chars)`);
+  deps.log.debug('command recognized', {
+    updateId: event.updateId,
+    command: command.command,
+    kind: command.kind,
+    chat: event.chat.kind,
+  });
 
   const conv = conversation(event.chat, event.platform, event.messageId);
   const inGroup = isGroupChat(event.chat);
@@ -183,7 +206,13 @@ async function processText(deps: BotDeps, event: TextMessageEvent): Promise<Proc
       username: sender.username ?? null,
       isBot: sender.isBot,
     });
-    if (registered.status !== 'ok') return [];
+    if (registered.status !== 'ok') {
+      deps.log.debug('player not registered; no reply', {
+        updateId: event.updateId,
+        status: registered.status,
+      });
+      return [];
+    }
     const groupId = inGroup ? await groupOf(ctx, event.chat, event.platform) : null;
     const h: HandlerContext = {
       ctx,

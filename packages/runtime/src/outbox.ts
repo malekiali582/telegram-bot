@@ -35,16 +35,20 @@ export async function enqueue(
   platform: Platform,
   item: OutboxItem,
   options: { onSent?: OnSentHook; dedupeKey?: string; notBefore?: Date } = {},
-): Promise<void> {
-  await ex.insert(outbox).values({
-    platform,
-    kind: item.kind,
-    payload: item.payload,
-    onSent: options.onSent ?? null,
-    dedupeKey: options.dedupeKey ?? null,
-    ...(options.notBefore ? { nextAttemptAt: options.notBefore } : {}),
-  });
+): Promise<number> {
+  const [row] = await ex
+    .insert(outbox)
+    .values({
+      platform,
+      kind: item.kind,
+      payload: item.payload,
+      onSent: options.onSent ?? null,
+      dedupeKey: options.dedupeKey ?? null,
+      ...(options.notBefore ? { nextAttemptAt: options.notBefore } : {}),
+    })
+    .returning({ id: outbox.id });
   await ex.execute(sql`SELECT pg_notify(${OUTBOX_CHANNEL}, '')`);
+  return row!.id;
 }
 
 export interface ClaimedMessage {

@@ -55,7 +55,10 @@ export class OutboxSender {
     const now = this.deps.ctx.clock.now();
     const batch = await claimDue(this.deps.ctx.db, now, { limit });
     const stats: DrainStats = { claimed: batch.length, sent: 0, failed: 0, deferred: 0 };
+    if (batch.length === 0) return stats;
+    this.deps.log.debug('outbox claimed', { ids: batch.map((m) => m.id) });
     for (const message of batch) await this.deliver(message, stats);
+    this.deps.log.debug('outbox drained', { ...stats });
     return stats;
   }
 
@@ -79,6 +82,7 @@ export class OutboxSender {
     const wait = this.limiter ? this.limiter.tryReserve(chatId, now.getTime()) : 0;
     if (wait > 0) {
       await deferClaimed(db, m.id, new Date(now.getTime() + wait));
+      this.deps.log.debug('outbox deferred by rate limit', { outboxId: m.id, waitMs: wait });
       stats.deferred++;
       return;
     }
@@ -117,15 +121,24 @@ export class OutboxSender {
       });
       this.deps.log.warn('send failed', {
         outboxId: m.id,
+        item: m.item.kind,
+        chatId,
         kind: e.kind,
         outcome,
         attempts: m.attempts,
+        error: e.message,
       });
       stats.failed++;
       return;
     }
 
     await markSent(db, m.id, now, ref);
+    this.deps.log.debug('outbox sent', {
+      outboxId: m.id,
+      item: m.item.kind,
+      chatId,
+      ...(ref ? { messageId: ref.messageId } : {}),
+    });
     stats.sent++;
     if (ref && m.onSent) {
       try {

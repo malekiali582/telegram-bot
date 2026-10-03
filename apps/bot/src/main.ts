@@ -49,8 +49,11 @@ if (tgEnv.TELEGRAM_MODE === 'webhook') {
     await handle.close();
   }, log);
 } else {
-  const polling = await startPolling(tg, onUpdate, log);
-  onShutdown(async () => {
+  let fatal: (reason: string) => void = () => {};
+  const polling = await startPolling(tg, onUpdate, log, {
+    onFatal: () => fatal('telegram polling stopped'),
+  });
+  fatal = onShutdown(async () => {
     await polling.stop();
     await handle.close();
   }, log);

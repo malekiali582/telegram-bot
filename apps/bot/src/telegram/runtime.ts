@@ -1,5 +1,7 @@
 import type { Server } from 'node:http';
-import { Bot } from 'grammy';
+import { Agent as HttpsAgent } from 'node:https';
+import type { Transformer } from 'grammy';
+import { Bot, GrammyError } from 'grammy';
 import type { Update } from 'grammy/types';
 import type { Logger } from '@lulu/runtime';
 import type { BotDeps } from '../core/processor.ts';
@@ -24,9 +26,18 @@ export interface TelegramBot {
   adapter: TelegramAdapter;
 }
 
+/**
+ * Connections to the Bot API use IPv4 only. api.telegram.org also resolves to IPv6,
+ * and Node's address auto-selection gives IPv4 just 250 ms per new connection before
+ * trying IPv6; behind a VPN or on a host without working IPv6 that ends in ETIMEDOUT
+ * (measured: 2 of 12 fresh connections failed, 0 of 12 with IPv4 only). The Bot API
+ * is always reachable over IPv4.
+ */
+const telegramAgent = new HttpsAgent({ keepAlive: true, family: 4 });
+
 /** Validates the token (getMe) and builds the adapter. Throws on an invalid token. */
 export async function connectTelegram(token: string): Promise<TelegramBot> {
-  const bot = new Bot(token);
+  const bot = new Bot(token, { client: { baseFetchConfig: { agent: telegramAgent } } });
   await bot.init();
   return {
     bot,
@@ -47,11 +58,19 @@ export function makeUpdateHandler(
   log: Logger,
 ): (update: Update) => Promise<void> {
   return async (update) => {
-    for (const event of toIncomingEvents(update, botId)) {
+    const events = toIncomingEvents(update, botId);
+    const first = events[0];
+    log.debug('update received', {
+      updateId: update.update_id,
+      kinds: Object.keys(update).filter((k) => k !== 'update_id'),
+      events: events.map((e) => e.type),
+      ...(first ? { chat: first.chat.kind, chatId: first.chat.platformChatId } : {}),
+    });
+    for (const event of events) {
       for (let attempt = 1; ; attempt++) {
         try {
           const outcome = await processEvent(deps, event);
-          log.debug('event', { type: event.type, updateId: event.updateId, outcome });
+          log.debug('event handled', { type: event.type, updateId: event.updateId, outcome });
           break;
         } catch (err) {
           if (attempt >= 3) throw err;
@@ -63,13 +82,79 @@ export function makeUpdateHandler(
   };
 }
 
-/** Long polling (development). Removes any webhook first: never both at once. */
+/**
+ * Makes long polling observable. grammY retries failed `getUpdates` calls on its own
+ * and reports them only through the `debug` package (silent by default), so a broken
+ * connection would otherwise look like a bot that simply receives nothing.
+ */
+export function pollingObserver(log: Logger): Transformer {
+  let working = false;
+  let failures = 0;
+
+  const observe = async (
+    poll: () => Promise<PollResponse>,
+    offset: number | undefined,
+    signal: { readonly aborted: boolean } | undefined,
+  ): Promise<PollResponse> => {
+    let response: PollResponse;
+    try {
+      response = await poll();
+    } catch (err) {
+      if (signal?.aborted) throw err; // polling stopped on purpose
+      failures++;
+      log.warn('telegram getUpdates failed (network); retrying', { failures, error: err });
+      throw err;
+    }
+    if (!response.ok) {
+      failures++;
+      log.warn('telegram getUpdates rejected', {
+        failures,
+        code: response.error_code,
+        description: response.description,
+      });
+      return response;
+    }
+    if (!working || failures > 0) {
+      log.info(working ? 'telegram getUpdates recovered' : 'telegram getUpdates works', {
+        afterFailures: failures,
+      });
+      working = true;
+      failures = 0;
+    }
+    const count = Array.isArray(response.result) ? response.result.length : 0;
+    if (count > 0) log.debug('telegram getUpdates', { count, offset });
+    else log.trace('telegram getUpdates', { count, offset });
+    return response;
+  };
+
+  return (prev, method, payload, signal) => {
+    if (method !== 'getUpdates') return prev(method, payload, signal);
+    const offset = (payload as { offset?: number } | undefined)?.offset;
+    const poll = () => prev(method, payload, signal) as Promise<PollResponse>;
+    return observe(poll, offset, signal) as ReturnType<typeof prev<typeof method>>;
+  };
+}
+
+/** The parts of a Bot API response the observer looks at. */
+type PollResponse =
+  { ok: true; result: unknown } | { ok: false; error_code: number; description: string };
+
+/**
+ * Long polling (development). Removes any webhook first: never both at once.
+ * `onFatal` is called if polling ends by itself, e.g. 409 Conflict (another process
+ * polls with the same token) or 401 (token revoked).
+ */
 export async function startPolling(
   tg: TelegramBot,
   onUpdate: (update: Update) => Promise<void>,
   log: Logger,
+  options: { onFatal?: (error: unknown, code: number | undefined) => void } = {},
 ): Promise<{ stop(): Promise<void> }> {
+  const info = await tg.bot.api.getWebhookInfo();
+  if (info.url)
+    log.warn('removing the webhook set on this bot', { pending: info.pending_update_count });
   await tg.bot.api.deleteWebhook({ drop_pending_updates: false });
+  tg.bot.api.config.use(pollingObserver(log));
   tg.bot.use(async (ctx) => {
     await onUpdate(ctx.update);
   });
@@ -80,10 +165,25 @@ export async function startPolling(
       error: err.error,
     });
   });
-  void tg.bot.start({
-    allowed_updates: [...ALLOWED_UPDATES],
-    onStart: () => log.info('telegram polling started', { bot: tg.username }),
-  });
+  tg.bot
+    .start({
+      allowed_updates: [...ALLOWED_UPDATES],
+      onStart: () => log.info('telegram polling started', { bot: tg.username }),
+    })
+    .catch((err: unknown) => {
+      const code = err instanceof GrammyError ? err.error_code : undefined;
+      log.error('telegram polling stopped', {
+        code,
+        hint:
+          code === 409
+            ? 'another process is receiving updates for this bot (same token)'
+            : code === 401
+              ? 'the bot token is no longer valid'
+              : undefined,
+        error: err,
+      });
+      options.onFatal?.(err, code);
+    });
   return { stop: () => tg.bot.stop() };
 }
 
