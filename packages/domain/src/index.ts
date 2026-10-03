@@ -21,3 +21,4 @@ export * from './city.ts';
 export * from './group-lifecycle.ts';
 export * from './leaderboard.ts';
 export * from './admin.ts';
+export * from './profile.ts';

@@ -1,0 +1,30 @@
+{
+  "name": "@lulu/worker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "worker «لولو»: ارسال صف پیام و کارهای دوره‌ای",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@lulu/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@lulu/bot": "*",
+    "@lulu/config": "*",
+    "@lulu/database": "*",
+    "@lulu/domain": "*",
+    "@lulu/platform": "*",
+    "@lulu/runtime": "*",
+    "drizzle-orm": "^0.45.3",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}

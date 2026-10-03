@@ -21,7 +21,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "npm run format:check && npm run typecheck && npm run lint && npm test && npm run test:pg",
-    "test:pg": "vitest run --mode pg"
+    "test:pg": "vitest run --mode pg",
+    "dev": "node --conditions=@lulu/source --import tsx scripts/dev.ts",
+    "bot:start": "node apps/bot/dist/main.js",
+    "worker:start": "node apps/worker/dist/main.js",
+    "dev:grant": "node --conditions=@lulu/source --import tsx scripts/dev-grant.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

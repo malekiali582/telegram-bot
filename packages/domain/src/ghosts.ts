@@ -5,12 +5,14 @@ import {
   dailyGhostState,
   ghostBatches,
   ghostEncounters,
+  ghostMessageRefs,
   ghostStories,
   inTransaction,
   playerState,
   settlements,
+  users,
 } from '@lulu/database';
-import { and, eq, isNull, notInArray, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, notInArray, sql } from 'drizzle-orm';
 import type { DomainContext } from './context.ts';
 import { claimWaitNotice, cooldownAvailableAt, isCoolingDown, startCooldown } from './cooldowns.ts';
 import { activateDueBatches } from './ghost-batches.ts';
@@ -267,12 +269,13 @@ export async function hearGhost(
   if (input.replyToMessageId === null || input.replyChatId === null) return { status: 'no_reply' };
   if (!input.replyFromThisBot) return { status: 'not_a_ghost' };
   const now = ctx.clock.now();
-  const [found] = await ctx.db
-    .select({
-      id: ghostEncounters.id,
-      userId: ghostEncounters.userId,
-      groupId: ghostEncounters.groupId,
-    })
+  const columns = {
+    id: ghostEncounters.id,
+    userId: ghostEncounters.userId,
+    groupId: ghostEncounters.groupId,
+  };
+  const [original] = await ctx.db
+    .select(columns)
     .from(ghostEncounters)
     .where(
       and(
@@ -281,6 +284,21 @@ export async function hearGhost(
         eq(ghostEncounters.messageId, input.replyToMessageId),
       ),
     );
+  // …or a re-post of it (see ghost_message_refs).
+  const [repost] = original
+    ? []
+    : await ctx.db
+        .select(columns)
+        .from(ghostMessageRefs)
+        .innerJoin(ghostEncounters, eq(ghostEncounters.id, ghostMessageRefs.encounterId))
+        .where(
+          and(
+            eq(ghostMessageRefs.platform, input.platform),
+            eq(ghostMessageRefs.chatId, input.replyChatId),
+            eq(ghostMessageRefs.messageId, input.replyToMessageId),
+          ),
+        );
+  const found = original ?? repost;
   if (!found) return { status: 'not_a_ghost' };
   // The ghost belongs to the city it was found in; a reply from another group (for
   // example via a cross-chat reply) never counts. A migrated group keeps its id.
@@ -318,4 +336,58 @@ export async function hearGhost(
     });
     return { status: 'ok', fearReward: encounter.fearReward, totalFear: state?.fear ?? 0 };
   });
+}
+
+/** Links another message showing the same ghost (a re-post) to its encounter. */
+export async function addEncounterMessageRef(
+  ctx: DomainContext,
+  input: { encounterId: number; platform: Platform; chatId: string; messageId: string },
+): Promise<void> {
+  await ctx.db
+    .insert(ghostMessageRefs)
+    .values({
+      encounterId: input.encounterId,
+      platform: input.platform,
+      chatId: input.chatId,
+      messageId: input.messageId,
+      createdAt: ctx.clock.now(),
+    })
+    .onConflictDoNothing();
+}
+
+export interface OpenEncounter {
+  encounterId: number;
+  userId: number;
+  /** Untrusted display text. */
+  ownerName: string;
+  text: string;
+  fearReward: number;
+  expiresAt: Date;
+}
+
+/** Ghosts of a group that can still be answered (unheard, before their deadline). */
+export async function openEncountersOfGroup(
+  ctx: DomainContext,
+  groupId: number,
+): Promise<OpenEncounter[]> {
+  const rows = await ctx.db
+    .select({
+      encounterId: ghostEncounters.id,
+      userId: ghostEncounters.userId,
+      ownerName: users.displayName,
+      text: ghostEncounters.textSnapshot,
+      fearReward: ghostEncounters.fearReward,
+      expiresAt: ghostEncounters.expiresAt,
+    })
+    .from(ghostEncounters)
+    .innerJoin(users, eq(users.id, ghostEncounters.userId))
+    .where(
+      and(
+        eq(ghostEncounters.groupId, groupId),
+        isNull(ghostEncounters.heardAt),
+        gt(ghostEncounters.expiresAt, ctx.clock.now()),
+      ),
+    )
+    .orderBy(ghostEncounters.id);
+  return rows;
 }

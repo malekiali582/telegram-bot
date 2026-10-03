@@ -468,3 +468,16 @@ export const auditLogs = pgTable('audit_logs', {
   requestId: text('request_id'),
   createdAt: instant('created_at').notNull().defaultNow(),
 });
+
+/** Additional messages showing an encounter (re-posts after a supergroup migration). */
+export const ghostMessageRefs = pgTable(
+  'ghost_message_refs',
+  {
+    platform: text('platform').$type<Platform>().notNull(),
+    chatId: text('chat_id').notNull(),
+    messageId: text('message_id').notNull(),
+    encounterId: ref('encounter_id').notNull(),
+    createdAt: instant('created_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.platform, t.chatId, t.messageId] })],
+);

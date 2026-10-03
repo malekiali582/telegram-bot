@@ -13,7 +13,8 @@ coverage/
 .env.*
 !.env.example
 
-# local databases (PGlite data dirs, dumps)
+# local databases (dev mode, PGlite data dirs, dumps)
+.lulu-dev/
 .pglite/
 *.pglite/
 pgdata/

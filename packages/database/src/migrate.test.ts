@@ -31,6 +31,7 @@ describe(`migrations (${testBackend()})`, () => {
       '0001_init',
       '0002_guards',
       '0003_system_wallets_default_config',
+      '0004_ghost_message_refs',
     ]);
     expect(checksum('a\r\nb')).toBe(checksum('a\nb'));
   });
@@ -43,6 +44,7 @@ describe(`migrations (${testBackend()})`, () => {
       '0001_init',
       '0002_guards',
       '0003_system_wallets_default_config',
+      '0004_ghost_message_refs',
     ]);
     expect(await migrateDatabase(t)).toEqual({ applied: [] });
   });

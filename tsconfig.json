@@ -19,6 +19,15 @@
     },
     {
       "path": "./packages/domain"
+    },
+    {
+      "path": "./packages/runtime"
+    },
+    {
+      "path": "./apps/bot"
+    },
+    {
+      "path": "./apps/worker"
     }
   ]
 }

@@ -1,0 +1,406 @@
+import { TOOL_KINDS } from '@lulu/config';
+import type { CurseKind, FoodKind, ToolKind } from '@lulu/config';
+import type {
+  CemeteryView,
+  CityView,
+  GhostSearchResult,
+  HuntResult,
+  LeaderboardEntry,
+  PlayerProfile,
+  ToolShopItem,
+  TreasuryView,
+} from '@lulu/domain';
+import {
+  CURSE_NAMES,
+  FOOD_NAMES,
+  TOOL_NAMES,
+  escapeHtml,
+  formatDuration,
+  formatInteger,
+  formatPercentBp,
+  formatPoints,
+  levelName,
+  toPersianDigits,
+} from '@lulu/i18n';
+
+/**
+ * Every user-facing sentence of the bot. Short Persian, few emoji, HTML parse mode.
+ * Anything user-controlled (names, ghost texts) goes through `escapeHtml`.
+ */
+
+export const pts = (centi: bigint) => `${formatPoints(centi)} پوینت`;
+export const name = (displayName: string) => `<b>${escapeHtml(displayName)}</b>`;
+const wait = (ms: number) => formatDuration(Math.ceil(ms / 1000));
+const tehranClock = (at: Date) =>
+  toPersianDigits(
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Tehran',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).format(at),
+  );
+const until = (at: Date, now: Date) => wait(at.getTime() - now.getTime());
+
+export const T = {
+  // ── general ──
+  banned: 'حساب شما در بازی مسدود است.',
+  groupOnly:
+    'این کار فقط داخل گروه انجام می‌شود. ربات را به گروه اضافه کنید و همان‌جا امتحان کنید.',
+  anonymousAdmin:
+    'شما به‌صورت ناشناس (به نام گروه) پیام داده‌اید. برای کارهای شخصی، با حساب خودتان پیام بدهید.',
+  replyToPerson:
+    'برای انتقال، روی پیام کسی که می‌خواهید به او پوینت بدهید reply کنید و بنویسید: «انتقال ۱۰۰»',
+  notRegisteredTarget:
+    'این کاربر هنوز در بازی ثبت نشده است. اول خودش باید یک‌بار «لولو» یا /start بزند.',
+  targetIsBot: 'به ربات‌ها نمی‌شود پوینت داد.',
+  selfTransfer: 'به خودتان نمی‌شود پوینت داد.',
+  onlyAdmins: 'فقط مالک یا ادمین‌های گروه می‌توانند خزانهٔ شهر را خرج کنند.',
+  invalidAmount: 'مبلغ نامعتبر است. یک عدد مثبت بنویسید، مثلاً «۱۰۰» یا «۱٬۵۰۰».',
+  tooPrecise: 'حداکثر دو رقم اعشار مجاز است.',
+  unknownItem: 'این مورد را نمی‌شناسم. فهرست را با «سرداب»، «ابزار شکار» یا «نفرین‌ها» ببینید.',
+  missingArg: (example: string) => `این دستور یک مقدار لازم دارد، مثلاً: «${example}»`,
+  cancelled: 'لغو شد.',
+  confirmPrompt: 'برای انجام، «تأیید» را بزنید.',
+  btn: {
+    confirm: '✅ تأیید',
+    cancel: '✖️ لغو',
+    help: 'راهنما',
+    cave: 'غار من',
+    addToGroup: '➕ افزودن به گروه',
+    globalBoard: 'رتبه‌بندی جهانی',
+  },
+  button: {
+    notYours: 'این دکمه مال شما نیست.',
+    invalid: 'این دکمه معتبر نیست.',
+    used: 'این دکمه قبلاً استفاده شده است.',
+    expired: 'مهلت این دکمه تمام شده؛ دستور را دوباره بفرستید.',
+    done: 'انجام شد.',
+  },
+
+  // ── onboarding ──
+  welcome: (displayName: string) =>
+    [
+      `سلام ${name(displayName)}! به «لولو» خوش آمدید 👻`,
+      'شما یک «روح» سطح ۱ هستید. در گروه بنویسید «لولو» تا پوینت بگیرید، شکار کنید، قبرستان بسازید و شهرتان را بزرگ کنید.',
+      'برای دیدن همهٔ دستورها «راهنما» را بزنید.',
+    ].join('\n\n'),
+  groupWelcome: [
+    '👻 «لولو» به این گروه آمد و این گروه حالا یک «لولوآباد» است.',
+    'برای شروع بنویسید: <b>لولو</b>',
+    '⚠️ برای اینکه پیام سادهٔ «لولو» به من برسد، یکی از این دو کار لازم است:',
+    '۱. مرا ادمین گروه کنید (هیچ دسترسی خاصی لازم نیست؛ همهٔ تیک‌ها را بردارید)،',
+    '۲. یا سازندهٔ ربات در BotFather گزینهٔ Group Privacy را خاموش کند.',
+    'بدون این، فقط دستورهای «/» و پاسخ‌ها (reply) به پیام‌های من دیده می‌شوند.',
+  ].join('\n'),
+
+  // ── lolo ──
+  loloOk: (displayName: string, base: number, food: bigint, cash: bigint) =>
+    food > 0n
+      ? `🧛 ${name(displayName)} لولو کرد: +${formatInteger(base)} (پایه) +${formatInteger(food)} (غذا)\nموجودی نقد: ${pts(cash)}`
+      : `🧛 ${name(displayName)} لولو کرد: +${formatInteger(base)} پوینت\nموجودی نقد: ${pts(cash)}`,
+  loloWait: (displayName: string, remainingMs: number) =>
+    `⏳ ${name(displayName)}، لولوی بعدی ${wait(remainingMs)} دیگر.`,
+
+  // ── balances & profile ──
+  balance: (v: TreasuryView) =>
+    [
+      `💰 نقد: ${pts(v.cashCenti)}`,
+      `🏦 گنجینه: ${pts(v.treasuryCenti)}`,
+      `جمع: ${pts(v.cashCenti + v.treasuryCenti)}`,
+    ].join('\n'),
+  cave: (p: PlayerProfile, now: Date) => {
+    const lines = [
+      `🕳 غار ${name(p.displayName)}`,
+      `سطح ${toPersianDigits(String(p.level))} — ${levelName(p.level)}`,
+      `💰 نقد: ${pts(p.cashCenti)} · 🏦 گنجینه: ${pts(p.treasuryCenti)}`,
+      `جمع: ${pts(p.cashCenti + p.treasuryCenti)} · 😱 ترس: ${formatInteger(p.fear)}`,
+      p.nextLevelCostCenti === null
+        ? 'به بالاترین سطح رسیده‌اید.'
+        : `هزینهٔ ارتقا به «${levelName(p.level + 1)}»: ${pts(p.nextLevelCostCenti)}`,
+      `🔪 ابزارها: ${
+        p.tools.owned.length === 0
+          ? 'هیچ'
+          : TOOL_KINDS.filter((t) => p.tools.owned.includes(t))
+              .map((t) =>
+                t === p.tools.equipped ? `<b>${TOOL_NAMES[t]}</b> (مجهز)` : TOOL_NAMES[t],
+              )
+              .join('، ')
+      }`,
+      `🍖 سرداب: ${foodList(p.inventory) || 'خالی'}`,
+      `🍽 وعده‌های فعال: ${toPersianDigits(String(p.meals.active.length))} از ${toPersianDigits(String(p.meals.capacity))}${
+        p.meals.active.length
+          ? ` (${p.meals.active.map((m) => `${FOOD_NAMES[m.food]} تا ${tehranClock(m.expiresAt)}`).join('، ')})`
+          : ''
+      }`,
+      p.cemetery
+        ? `⚰️ قبرستان سطح ${toPersianDigits(String(p.cemetery.level))}: ${pts(p.cemetery.hourlyIncomeCenti)} در ساعت`
+        : '⚰️ قبرستان: ندارید',
+      `👻 روح امروز: ${toPersianDigits(String(p.ghostsToday.found))} از ${toPersianDigits(String(p.ghostsToday.limit))}`,
+    ];
+    const waits = (
+      [
+        ['lolo', 'لولو'],
+        ['hunt', 'شکار'],
+        ['ghost', 'روح'],
+      ] as const
+    )
+      .filter(([k]) => p.waits[k])
+      .map(([k, label]) => `${label}: ${until(p.waits[k]!, now)}`);
+    if (waits.length) lines.push(`⏳ انتظار — ${waits.join(' · ')}`);
+    return lines.join('\n');
+  },
+
+  // ── level ──
+  levelPreview: (current: number, cost: bigint, cash: bigint) =>
+    `ارتقا از «${levelName(current)}» به «${levelName(current + 1)}»\nهزینه: ${pts(cost)} (از نقد)\nموجودی نقد: ${pts(cash)}`,
+  levelNotAffordable: (cost: bigint, cash: bigint) =>
+    `برای ارتقا ${pts(cost)} نقد لازم است؛ شما ${pts(cash)} دارید.`,
+  levelMax: 'به بالاترین سطح («خون‌آشام») رسیده‌اید.',
+  levelOk: (level: number, cash: bigint) =>
+    `🎉 حالا «${levelName(level)}» (سطح ${toPersianDigits(String(level))}) هستید. موجودی نقد: ${pts(cash)}`,
+  stale: 'وضعیت تغییر کرده است؛ دستور را دوباره بفرستید.',
+
+  // ── tools ──
+  shop: (items: ToolShopItem[], cash: bigint) =>
+    [
+      '🔪 ابزار شکار (دائمی، بدون فروش و استهلاک)',
+      ...items.map(
+        (i) =>
+          `${i.equipped ? '✅' : i.owned ? '☑️' : '▫️'} ${TOOL_NAMES[i.tool]} — ${pts(i.priceCenti)} — موفقیت ${formatPercentBp(i.successBp)}${
+            i.equipped ? ' (مجهز)' : i.owned ? ' (دارید)' : ''
+          }`,
+      ),
+      `موجودی نقد: ${pts(cash)}`,
+    ].join('\n'),
+  toolPreview: (tool: ToolKind, price: bigint, cash: bigint) =>
+    `خرید ${TOOL_NAMES[tool]} به قیمت ${pts(price)}؟\nموجودی نقد: ${pts(cash)}`,
+  toolOk: (tool: ToolKind, equipped: boolean) =>
+    `${TOOL_NAMES[tool]} خریداری شد${equipped ? ' و مجهز شد' : '. برای استفاده «تجهیز ' + TOOL_NAMES[tool] + '» را بزنید'}.`,
+  toolOwned: (tool: ToolKind) => `${TOOL_NAMES[tool]} را از قبل دارید.`,
+  toolNotOwned: (tool: ToolKind) => `${TOOL_NAMES[tool]} را ندارید؛ اول آن را بخرید.`,
+  equipped: (tool: ToolKind) => `${TOOL_NAMES[tool]} مجهز شد.`,
+
+  // ── hunt ──
+  hunt: (displayName: string, r: HuntResult, now: Date) => {
+    switch (r.status) {
+      case 'success':
+        return `🏹 ${name(displayName)} با ${TOOL_NAMES[r.tool]} یک «${FOOD_NAMES[r.food]}» شکار کرد! شکار بعدی ${until(r.nextAvailableAt, now)} دیگر.`;
+      case 'failed':
+        return `🌫 ${name(displayName)} با ${TOOL_NAMES[r.tool]} چیزی شکار نکرد. شکار بعدی ${until(r.nextAvailableAt, now)} دیگر.`;
+      case 'level_too_low':
+        return `شکار از سطح ${toPersianDigits(String(r.minLevel))} («${levelName(r.minLevel)}») ممکن است. با «ارتقای لولو» بالا بروید.`;
+      case 'no_tool':
+        return 'برای شکار ابزار لازم است. با «ابزار شکار» یکی بخرید.';
+      case 'cooldown':
+        return `⏳ ${name(displayName)}، شکار بعدی ${wait(r.remainingMs)} دیگر.`;
+      case 'banned':
+        return T.banned;
+    }
+  },
+
+  // ── food ──
+  cellar: (inv: Record<FoodKind, number>, active: number, capacity: number) =>
+    [
+      `🍖 سرداب: ${foodList(inv) || 'خالی'}`,
+      `وعده‌های فعال: ${toPersianDigits(String(active))} از ${toPersianDigits(String(capacity))}`,
+      'برای خوردن: «خوردن استخوان ۲» یا دکمه‌ها.',
+    ].join('\n'),
+  eatPreview: (food: FoodKind, count: number) =>
+    `خوردن ${toPersianDigits(String(count))} «${FOOD_NAMES[food]}»؟ هر وعده ۳۰ دقیقه فعال است و با لولوی بعدی پاداش می‌دهد.`,
+  eatOk: (food: FoodKind, count: number, expiresAt: Date, active: number, capacity: number) =>
+    `😋 ${toPersianDigits(String(count))} «${FOOD_NAMES[food]}» خورده شد؛ تا ${tehranClock(expiresAt)} فعال است. وعده‌های فعال: ${toPersianDigits(String(active))} از ${toPersianDigits(String(capacity))}.`,
+  eatCapacity: (active: number, capacity: number, requested: number) =>
+    capacity === 0
+      ? 'در این سطح هنوز نمی‌توانید غذا بخورید (ظرفیت صفر). با «ارتقای لولو» بالا بروید.'
+      : `ظرفیت کافی نیست: ${toPersianDigits(String(active))} وعدهٔ فعال از ${toPersianDigits(String(capacity))}؛ ${toPersianDigits(String(requested))} وعدهٔ دیگر جا نمی‌شود.`,
+  notEnoughFood: (food: FoodKind, have: number) =>
+    `از «${FOOD_NAMES[food]}» فقط ${toPersianDigits(String(have))} عدد دارید.`,
+
+  // ── cemetery ──
+  cemetery: (v: CemeteryView) => {
+    if (v.status === 'banned') return T.banned;
+    if (v.status === 'closed') {
+      return `⚰️ هنوز قبرستان ندارید. افتتاح: ${pts(v.openCostCenti)} — درآمد ساعتی بدون نیاز به آنلاین بودن.\nموجودی نقد: ${pts(v.cashCenti)}`;
+    }
+    return [
+      `⚰️ قبرستان سطح ${toPersianDigits(String(v.level))} از ${toPersianDigits(String(v.maxLevel))}`,
+      `درآمد: ${pts(v.hourlyIncomeCenti)} در ساعت (خودکار به نقد واریز می‌شود)`,
+      v.nextUpgradeCostCenti === null
+        ? 'به بالاترین سطح رسیده است.'
+        : `هزینهٔ ارتقا: ${pts(v.nextUpgradeCostCenti)}`,
+      `موجودی نقد: ${pts(v.cashCenti)}`,
+    ].join('\n');
+  },
+  cemeteryOpenPreview: (cost: bigint) => `افتتاح قبرستان با ${pts(cost)}؟`,
+  cemeteryUpgradePreview: (level: number, cost: bigint) =>
+    `ارتقای قبرستان به سطح ${toPersianDigits(String(level + 1))} با ${pts(cost)}؟`,
+  cemeteryOpened: '⚰️ قبرستان افتتاح شد و از همین حالا درآمد می‌دهد.',
+  cemeteryUpgraded: (level: number) => `⚰️ قبرستان به سطح ${toPersianDigits(String(level))} رسید.`,
+  cemeteryAlreadyOpen: 'قبرستان را از قبل دارید.',
+  cemeteryNotOpen: 'اول قبرستان را افتتاح کنید.',
+
+  // ── treasury & transfer ──
+  treasury: (v: TreasuryView, now: Date) =>
+    [
+      `🏦 گنجینه: ${pts(v.treasuryCenti)}`,
+      `هر نیمه‌شب (تهران) ${formatPercentBp(v.dailyInterestBp)} سود به خود گنجینه اضافه می‌شود. نیمه‌شب بعدی: ${until(v.nextInterestAt, now)} دیگر.`,
+      v.lastInterest ? `آخرین سود: ${pts(v.lastInterest.interestCenti)}` : '',
+      `💰 نقد: ${pts(v.cashCenti)}`,
+      '«واریز گنجینه ۱۰۰» · «برداشت گنجینه ۱۰۰»',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  depositPreview: (amount: bigint) => `واریز ${pts(amount)} از نقد به گنجینه؟`,
+  withdrawPreview: (amount: bigint) => `برداشت ${pts(amount)} از گنجینه به نقد؟`,
+  moved: (cash: bigint, treasury: bigint) =>
+    `انجام شد. 💰 نقد: ${pts(cash)} · 🏦 گنجینه: ${pts(treasury)}`,
+  insufficient: (available: bigint) => `موجودی کافی نیست؛ موجودی قابل استفاده: ${pts(available)}`,
+  transferPreview: (toName: string, toId: string, amount: bigint) =>
+    `انتقال ${pts(amount)} از نقد شما به ${name(toName)} (شناسه <code>${escapeHtml(toId)}</code>)؟ کارمزد: صفر.`,
+  transferOk: (toName: string, amount: bigint, cash: bigint) =>
+    `✅ ${pts(amount)} به ${name(toName)} منتقل شد. موجودی نقد شما: ${pts(cash)}`,
+  recipientBanned: 'حساب گیرنده مسدود است.',
+
+  // ── city ──
+  city: (v: CityView) =>
+    [
+      `🏚 لولوآباد سطح ${toPersianDigits(String(v.level))} از ${toPersianDigits(String(v.maxLevel))}`,
+      `👥 جمعیت فعال: ${toPersianDigits(String(v.population.active))}${
+        v.population.requiredForNext === null
+          ? ''
+          : ` (برای ارتقا ${toPersianDigits(String(v.population.requiredForNext))} لازم است)`
+      }`,
+      `   «جمعیت فعال» یعنی اعضای این گروه که در ${toPersianDigits(String(v.population.windowDays))} روز گذشته اینجا لولو، شکار یا جست‌وجوی روح موفق داشته‌اند.`,
+      `🍖 ذخیرهٔ شکار: ${formatInteger(v.huntStore.points)} امتیاز (کل اهداها: ${formatInteger(v.huntStore.donatedTotal)})`,
+      `🩸 بانک خون سطح ${toPersianDigits(String(v.bloodBank.level))}: ${pts(v.bloodBank.balanceCenti)}`,
+      `🏹 شکارگاه سطح ${toPersianDigits(String(v.huntingGround.level))} (سقف با این بانک: ${toPersianDigits(String(v.huntingGround.maxForBank))})`,
+      `🔮 نفرین‌ها: ${(Object.keys(v.curses) as CurseKind[])
+        .map((k) => `${CURSE_NAMES[k]} ${toPersianDigits(String(v.curses[k].level))}`)
+        .join(' · ')}`,
+      v.next.city
+        ? `ارتقای آبادی: ${pts(v.next.city.bloodBankCostCenti)} از بانک + ${formatInteger(v.next.city.huntPointsCost)} امتیاز شکار`
+        : 'آبادی در بالاترین سطح است.',
+    ].join('\n'),
+  bloodBank: (v: CityView) =>
+    [
+      `🩸 بانک خون سطح ${toPersianDigits(String(v.bloodBank.level))}`,
+      `موجودی: ${pts(v.bloodBank.balanceCenti)} · کل اهداها: ${pts(v.bloodBank.donatedTotalCenti)}`,
+      v.next.bloodBank
+        ? `ارتقا: ${pts(v.next.bloodBank.costCenti)} (نیازمند آبادی سطح ${toPersianDigits(String(v.next.bloodBank.requiresCityLevel))})`
+        : 'بانک در بالاترین سطح است.',
+      'هر عضو می‌تواند اهدا کند: «اهدای خون ۵۰۰». خرج آن فقط با مالک یا ادمین‌ها و فقط برای ارتقاست.',
+    ].join('\n'),
+  huntingGround: (v: CityView) =>
+    [
+      `🏹 شکارگاه سطح ${toPersianDigits(String(v.huntingGround.level))} (سقف با بانک فعلی: ${toPersianDigits(String(v.huntingGround.maxForBank))})`,
+      v.next.huntingGround
+        ? `ارتقا: ${pts(v.next.huntingGround.costCenti)} از بانک خون`
+        : 'در بالاترین سطح است.',
+      'سطح بالاتر، شانس شکارهای بزرگ‌تر را بیشتر می‌کند.',
+    ].join('\n'),
+  curses: (v: CityView) =>
+    [
+      '🔮 نفرین‌ها (اثر فقط در همین گروه):',
+      ...(Object.keys(v.curses) as CurseKind[]).map((k) => {
+        const next = v.next.curses[k];
+        return `${CURSE_NAMES[k]}: سطح ${toPersianDigits(String(v.curses[k].level))} (سقف ${toPersianDigits(String(v.curses[k].maxForBank))})${
+          next ? ` — سطح بعد: ${pts(next.costCenti)}` : ''
+        }`;
+      }),
+      'هر سطح ۵٪ از زمان انتظار پایه کم می‌کند. «ارتقای نفرین شتاب شکار»',
+    ].join('\n'),
+  upgradePreview: (what: string, cost: bigint, huntPoints = 0) =>
+    `ارتقای ${what} با ${pts(cost)} از بانک خون${huntPoints ? ` و ${formatInteger(huntPoints)} امتیاز شکار` : ''}؟`,
+  upgradeDone: (what: string, level: number) =>
+    `🏗 ${what} به سطح ${toPersianDigits(String(level))} رسید.`,
+  populationLow: (active: number, required: number) =>
+    `جمعیت فعال کافی نیست: ${toPersianDigits(String(active))} از ${toPersianDigits(String(required))}.`,
+  bankLow: (cost: bigint, balance: bigint) =>
+    `بانک خون کافی نیست: ${pts(balance)} از ${pts(cost)}.`,
+  huntPointsLow: (cost: number, available: number) =>
+    `ذخیرهٔ شکار کافی نیست: ${formatInteger(available)} از ${formatInteger(cost)}.`,
+  needsCityLevel: (level: number) =>
+    `اول آبادی باید به سطح ${toPersianDigits(String(level))} برسد.`,
+  needsBankLevel: (max: number) =>
+    `با سطح فعلی بانک خون حداکثر سطح ${toPersianDigits(String(max))} مجاز است.`,
+  maxLevelReached: 'در بالاترین سطح است.',
+  donateBloodPreview: (amount: bigint) =>
+    `اهدای ${pts(amount)} از نقد شما به بانک خون این گروه؟ این اهدا قطعی است.`,
+  donateBloodOk: (amount: bigint, bank: bigint) =>
+    `🩸 ${pts(amount)} اهدا شد. بانک خون: ${pts(bank)}`,
+  donateHuntPreview: (food: FoodKind, count: number) =>
+    `اهدای ${toPersianDigits(String(count))} «${FOOD_NAMES[food]}» به ذخیرهٔ شکار گروه؟`,
+  donateHuntOk: (food: FoodKind, count: number, points: number, pool: number) =>
+    `🍖 ${toPersianDigits(String(count))} «${FOOD_NAMES[food]}» اهدا شد (+${formatInteger(points)}). ذخیرهٔ شکار: ${formatInteger(pool)}`,
+
+  // ── ghosts ──
+  ghostFound: (displayName: string, text: string, fear: number, expiresAt: Date, now: Date) =>
+    [
+      `👻 ${name(displayName)} روحی از یاد رفته پیدا کرد…`,
+      '',
+      `<i>${escapeHtml(text)}</i>`,
+      '',
+      `برای گرفتن ${formatInteger(fear)} امتیاز ترس، روی همین پیام reply کنید و بنویسید «شنیدم» (تا ${until(expiresAt, now)} دیگر).`,
+    ].join('\n'),
+  ghostSearch: (
+    displayName: string,
+    r: Exclude<GhostSearchResult, { status: 'found' }>,
+    now: Date,
+  ) => {
+    switch (r.status) {
+      case 'not_found': {
+        const pct = Number((r.nextChance.numerator * 10_000n) / r.nextChance.denominator);
+        return `🌫 ${name(displayName)} روحی پیدا نکرد. شانس تلاش بعدی: ${formatPercentBp(pct)} — ${until(r.nextAvailableAt, now)} دیگر.`;
+      }
+      case 'daily_limit':
+        return `امروز ${toPersianDigits(String(r.dailyLimit))} روح پیدا کرده‌اید؛ سهمیهٔ بعدی از نیمه‌شب (تهران).`;
+      case 'no_content':
+        return 'امشب روحی سرگردان نیست. بعداً دوباره سر بزنید.';
+      case 'cooldown':
+        return `⏳ ${name(displayName)}، جست‌وجوی بعدی ${wait(r.remainingMs)} دیگر.`;
+      case 'banned':
+        return T.banned;
+    }
+  },
+  ghostRepost: (ownerName: string, text: string, fear: number, expiresAt: Date, now: Date) =>
+    [
+      `👻 روح شنیده‌نشدهٔ ${name(ownerName)} (پیش از ارتقای گروه به سوپرگروه پیدا شده بود)…`,
+      '',
+      `<i>${escapeHtml(text)}</i>`,
+      '',
+      `صاحبش می‌تواند روی همین پیام reply کند و «شنیدم» بنویسد: ${formatInteger(fear)} امتیاز ترس (تا ${until(expiresAt, now)} دیگر).`,
+    ].join('\n'),
+  heardOk: (displayName: string, fear: number, total: number) =>
+    `😱 ${name(displayName)} شنید! +${formatInteger(fear)} ترس (مجموع: ${formatInteger(total)})`,
+  heardNoReply: 'برای «شنیدم»، روی پیام روحی که خودتان پیدا کرده‌اید reply کنید.',
+  heardNotGhost: 'این پیام، پیام روح نیست. روی خود پیام روح (نه نسخهٔ فورواردشده) reply کنید.',
+  heardWrongGroup: 'این روح مال گروه دیگری است.',
+  heardNotOwner: 'این روح را کس دیگری پیدا کرده است.',
+  heardAlready: 'این روح را قبلاً شنیده‌اید.',
+  heardExpired: 'مهلت شنیدن این روح تمام شده است.',
+
+  // ── leaderboard ──
+  leaderboard: (title: string, entries: LeaderboardEntry[], me: LeaderboardEntry | null) =>
+    [
+      `😱 ترسناک‌ترین لولوها — ${title}`,
+      ...(entries.length
+        ? entries.map(
+            (e) =>
+              `${toPersianDigits(String(e.rank))}. ${name(e.displayName)} — ترس ${formatInteger(e.fear)} · ${levelName(e.level)}`,
+          )
+        : ['هنوز کسی ترسی جمع نکرده است.']),
+      me && !entries.some((e) => e.userId === me.userId)
+        ? `…\n${toPersianDigits(String(me.rank))}. شما — ترس ${formatInteger(me.fear)}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+};
+
+function foodList(inv: Record<FoodKind, number>): string {
+  return (Object.keys(inv) as FoodKind[])
+    .filter((f) => inv[f] > 0)
+    .map((f) => `${FOOD_NAMES[f]} ×${formatInteger(inv[f])}`)
+    .join('، ');
+}

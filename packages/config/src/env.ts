@@ -133,3 +133,15 @@ export function parseEnv<S extends z.ZodType>(
   );
   throw new EnvError(variables, details);
 }
+
+/** Local listener for the Telegram webhook (behind an HTTPS reverse proxy). */
+export const webhookServerEnvSchema = z.object({
+  TELEGRAM_WEBHOOK_HOST: z.string().min(1).default('127.0.0.1'),
+  TELEGRAM_WEBHOOK_PORT: z.coerce.number().int().min(1).max(65_535).default(8443),
+});
+
+/** Development mode (`npm run dev`) only. */
+export const devEnvSchema = z.object({
+  DEV_DB_PORT: z.coerce.number().int().min(1024).max(65_535).default(54329),
+  LOG_FORMAT: z.enum(['pretty', 'json']).default('pretty'),
+});

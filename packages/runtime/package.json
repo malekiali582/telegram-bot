@@ -1,0 +1,23 @@
+{
+  "name": "@lulu/runtime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "زیرساخت اجرایی مشترک: logger، صف ارسال (outbox) و زمان‌بندی کارها روی PostgreSQL",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@lulu/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@lulu/config": "*",
+    "@lulu/database": "*",
+    "@lulu/platform": "*",
+    "drizzle-orm": "^0.45.3"
+  }
+}
