@@ -6,6 +6,7 @@ import {
   findUserIdByIdentity,
   memberLeftGroup,
   migrateGroupChat,
+  noteGroupPresence,
   openEncountersOfGroup,
   registerGroup,
   registerPlayer,
@@ -214,6 +215,7 @@ async function processText(deps: BotDeps, event: TextMessageEvent): Promise<Proc
       return [];
     }
     const groupId = inGroup ? await groupOf(ctx, event.chat, event.platform) : null;
+    if (groupId !== null) await noteGroupPresence(ctx, { groupId, userId: registered.userId });
     const h: HandlerContext = {
       ctx,
       conv,

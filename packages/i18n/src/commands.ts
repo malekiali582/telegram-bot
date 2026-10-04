@@ -35,8 +35,12 @@ export type ArgProblem = AmountProblem | 'missing' | 'unknown_item';
 
 export type ParsedCommand =
   | { [K in CommandId]: { kind: 'command'; command: K; args: CommandArgs[K] } }[CommandId]
-  /** Recognized command with unusable arguments: reply with usage help. */
-  | { kind: 'invalid'; command: CommandId; problem: ArgProblem };
+  /**
+   * Recognized command with unusable arguments: reply with usage help. `argText` is the
+   * normalized text after the command word (null if there was none), so the reply can
+   * say exactly what was not understood.
+   */
+  | { kind: 'invalid'; command: CommandId; problem: ArgProblem; argText: string | null };
 
 export interface ParseOptions {
   /** This bot's username; `/cmd@OtherBot` is then ignored. */
@@ -170,7 +174,7 @@ export function parseCommand(text: string, options: ParseOptions = {}): ParsedCo
     const result = parseArgs(spec, rest);
     return result.ok
       ? ({ kind: 'command', command, args: result.args } as ParsedCommand)
-      : { kind: 'invalid', command, problem: result.problem };
+      : { kind: 'invalid', command, problem: result.problem, argText: rest };
   }
   return null;
 }

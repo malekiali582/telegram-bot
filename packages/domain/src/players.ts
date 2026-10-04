@@ -146,6 +146,26 @@ export async function beginPlayerAction(
   };
 }
 
+/**
+ * Any command a player sends in a group shows they are in it, so they count as a member
+ * (e.g. for the group's «ترسناک‌ترین لولوها») even before a successful «لولو» there.
+ * Does not record a successful activity, and writes nothing if already a member.
+ */
+export async function noteGroupPresence(
+  ctx: DomainContext,
+  input: { groupId: number; userId: number },
+): Promise<void> {
+  const now = ctx.clock.now();
+  await ctx.db
+    .insert(memberships)
+    .values({ groupId: input.groupId, userId: input.userId, status: 'member', joinedAt: now })
+    .onConflictDoUpdate({
+      target: [memberships.groupId, memberships.userId],
+      set: { status: 'member', leftAt: null },
+      setWhere: sql`${memberships.status} <> 'member'`,
+    });
+}
+
 /** Records that the player is in the group, and optionally a successful activity there. */
 export async function touchMembership(
   tx: Tx,

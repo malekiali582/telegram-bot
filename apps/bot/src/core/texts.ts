@@ -30,6 +30,8 @@ import {
 
 export const pts = (centi: bigint) => `${formatPoints(centi)} پوینت`;
 export const name = (displayName: string) => `<b>${escapeHtml(displayName)}</b>`;
+/** Quoted user input is shortened so a long message is not echoed back whole. */
+const clip = (text: string, max = 40) => (text.length > max ? `${text.slice(0, max)}…` : text);
 const wait = (ms: number) => formatDuration(Math.ceil(ms / 1000));
 const tehranClock = (at: Date) =>
   toPersianDigits(
@@ -42,6 +44,9 @@ const tehranClock = (at: Date) =>
   );
 const until = (at: Date, now: Date) => wait(at.getTime() - now.getTime());
 
+const GLOBAL_BOARD_IN_PRIVATE =
+  'رتبه‌بندی جهانی فقط در چت خصوصی با ربات نشان داده می‌شود؛ آنجا «ترسناک‌ترین لولوها» را بفرستید.';
+
 export const T = {
   // ── general ──
   banned: 'حساب شما در بازی مسدود است.',
@@ -50,13 +55,20 @@ export const T = {
   anonymousAdmin:
     'شما به‌صورت ناشناس (به نام گروه) پیام داده‌اید. برای کارهای شخصی، با حساب خودتان پیام بدهید.',
   replyToPerson:
-    'برای انتقال، روی پیام کسی که می‌خواهید به او پوینت بدهید reply کنید و بنویسید: «انتقال ۱۰۰»',
+    'برای انتقال باید روی پیام گیرنده reply کنید و فقط بنویسید: «انتقال ۱۰۰». گیرنده با @نام‌کاربری یا اسم مشخص نمی‌شود.',
   notRegisteredTarget:
     'این کاربر هنوز در بازی ثبت نشده است. اول خودش باید یک‌بار «لولو» یا /start بزند.',
   targetIsBot: 'به ربات‌ها نمی‌شود پوینت داد.',
   selfTransfer: 'به خودتان نمی‌شود پوینت داد.',
   onlyAdmins: 'فقط مالک یا ادمین‌های گروه می‌توانند خزانهٔ شهر را خرج کنند.',
   invalidAmount: 'مبلغ نامعتبر است. یک عدد مثبت بنویسید، مثلاً «۱۰۰» یا «۱٬۵۰۰».',
+  /** The text after the command is not a plain number (extra words, a unit, a mention…). */
+  amountNotANumber: (argText: string, example: string) =>
+    `«${escapeHtml(clip(argText))}» عدد نیست. بعد از دستور فقط مبلغ را با رقم بنویسید، بدون واحد یا متن اضافه؛ مثلاً «${example}».`,
+  transferRecipientByReply: 'گیرنده همان کسی است که روی پیامش reply کرده‌اید؛ نام یا @ لازم نیست.',
+  amountZero: 'مبلغ باید بیشتر از صفر باشد.',
+  amountNegative: 'مبلغ نمی‌تواند منفی باشد.',
+  amountTooLarge: 'این مبلغ بیش از حد بزرگ است.',
   tooPrecise: 'حداکثر دو رقم اعشار مجاز است.',
   unknownItem: 'این مورد را نمی‌شناسم. فهرست را با «سرداب»، «ابزار شکار» یا «نفرین‌ها» ببینید.',
   missingArg: (example: string) => `این دستور یک مقدار لازم دارد، مثلاً: «${example}»`,
@@ -68,7 +80,6 @@ export const T = {
     help: 'راهنما',
     cave: 'غار من',
     addToGroup: '➕ افزودن به گروه',
-    globalBoard: 'رتبه‌بندی جهانی',
   },
   button: {
     notYours: 'این دکمه مال شما نیست.',
@@ -381,9 +392,15 @@ export const T = {
   heardExpired: 'مهلت شنیدن این روح تمام شده است.',
 
   // ── leaderboard ──
-  leaderboard: (title: string, entries: LeaderboardEntry[], me: LeaderboardEntry | null) =>
+  globalBoardInPrivate: GLOBAL_BOARD_IN_PRIVATE,
+  /** In a group only that group's members; the global list is for private chat. */
+  leaderboard: (
+    scope: 'group' | 'global',
+    entries: LeaderboardEntry[],
+    me: LeaderboardEntry | null,
+  ) =>
     [
-      `😱 ترسناک‌ترین لولوها — ${title}`,
+      `😱 ترسناک‌ترین لولوها — ${scope === 'group' ? 'این گروه' : 'جهانی'}`,
       ...(entries.length
         ? entries.map(
             (e) =>
@@ -393,6 +410,7 @@ export const T = {
       me && !entries.some((e) => e.userId === me.userId)
         ? `…\n${toPersianDigits(String(me.rank))}. شما — ترس ${formatInteger(me.fear)}`
         : '',
+      scope === 'group' ? `\n<i>${GLOBAL_BOARD_IN_PRIVATE}</i>` : '',
     ]
       .filter(Boolean)
       .join('\n'),

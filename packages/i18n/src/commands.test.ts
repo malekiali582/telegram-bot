@@ -61,17 +61,35 @@ describe('commands with arguments', () => {
   });
 
   it('reports bad or missing amounts as invalid instead of ignoring them', () => {
-    expect(cmd('انتقال')).toEqual({ kind: 'invalid', command: 'transfer', problem: 'missing' });
+    expect(cmd('انتقال')).toEqual({
+      kind: 'invalid',
+      command: 'transfer',
+      problem: 'missing',
+      argText: null,
+    });
     expect(cmd('انتقال -50')).toEqual({
       kind: 'invalid',
       command: 'transfer',
       problem: 'negative',
+      argText: '-50',
     });
     expect(cmd('اهدای خون صفر')).toEqual({
       kind: 'invalid',
       command: 'donate_blood',
       problem: 'invalid',
+      argText: 'صفر',
     });
+  });
+
+  it('keeps the argument text of an invalid amount so the reply can quote it', () => {
+    for (const [text, problem, argText] of [
+      ['انتقال 50 لولو', 'invalid', '50 لولو'],
+      ['انتقال ۵۰ @someone', 'invalid', '50 @someone'],
+      ['انتقال 0', 'zero', '0'],
+      ['انتقال ۱۰۰۰۰۰۰۰۰۰۰۰۰۰۰', 'too_large', '100000000000000'],
+    ] as const) {
+      expect(cmd(text)).toEqual({ kind: 'invalid', command: 'transfer', problem, argText });
+    }
   });
 
   it('parses food and count in either order, defaulting the count to 1', () => {

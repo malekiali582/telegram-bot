@@ -30,7 +30,7 @@ import {
   upgradeLevel,
   withdrawFromTreasury,
 } from '@lulu/domain';
-import type { ArgProblem, ParsedCommand } from '@lulu/i18n';
+import type { ParsedCommand } from '@lulu/i18n';
 import { CURSE_NAMES, FOOD_NAMES, TOOL_NAMES, helpText } from '@lulu/i18n';
 import type { MemberRole, ReplyTarget, Sender } from '@lulu/platform';
 import type { ButtonSpec, PendingButton } from './buttons.ts';
@@ -371,8 +371,10 @@ async function runOp(
 
 // ───────────────────────── text commands ─────────────────────────
 
-function problemText(problem: ArgProblem, example: string): string {
-  switch (problem) {
+/** Says exactly what was wrong with the argument, quoting it when it was not a number. */
+function problemText(cmd: Extract<ParsedCommand, { kind: 'invalid' }>): string {
+  const example = EXAMPLES[cmd.command] ?? cmd.command;
+  switch (cmd.problem) {
     case 'missing':
     case 'empty':
       return T.missingArg(example);
@@ -380,9 +382,27 @@ function problemText(problem: ArgProblem, example: string): string {
       return T.unknownItem;
     case 'too_precise':
       return T.tooPrecise;
-    default:
-      return T.invalidAmount;
+    case 'zero':
+      return T.amountZero;
+    case 'negative':
+      return T.amountNegative;
+    case 'too_large':
+      return T.amountTooLarge;
+    case 'invalid': {
+      if (cmd.argText === null) return T.invalidAmount;
+      const text = T.amountNotANumber(cmd.argText, example);
+      return cmd.command === 'transfer' ? `${text}\n${T.transferRecipientByReply}` : text;
+    }
   }
+}
+
+/** Why a transfer cannot go to the replied-to message's author, if it cannot. */
+function transferTargetProblem(h: HandlerContext): string | null {
+  const target = h.replyTo;
+  if (!target || !target.sender) return T.replyToPerson;
+  if (target.fromThisBot || target.sender.isBot) return T.targetIsBot;
+  if (target.sender.platformUserId === h.sender.platformUserId) return T.selfTransfer;
+  return null;
 }
 
 const EXAMPLES: Record<string, string> = {
@@ -417,9 +437,13 @@ const GROUP_ONLY = new Set([
 
 export async function handleCommand(h: HandlerContext, cmd: ParsedCommand): Promise<Reply[]> {
   if (GROUP_ONLY.has(cmd.command) && h.groupId === null) return [send(h.conv, T.groupOnly)];
-  if (cmd.kind === 'invalid') {
-    return [send(h.conv, problemText(cmd.problem, EXAMPLES[cmd.command] ?? cmd.command))];
+  // A missing reply is the usual mistake («انتقال ۵۰ @someone»), so it is reported
+  // before the amount: otherwise the player only hears that the amount is invalid.
+  if (cmd.command === 'transfer') {
+    const problem = transferTargetProblem(h);
+    if (problem) return [send(h.conv, problem)];
   }
+  if (cmd.kind === 'invalid') return [send(h.conv, problemText(cmd))];
   const t = now(h);
   const groupId = h.groupId!;
   const who = h.sender.displayName;
@@ -527,16 +551,8 @@ export async function handleCommand(h: HandlerContext, cmd: ParsedCommand): Prom
       return sendPreview(h, cmd.command, { amount: cmd.args.amountCenti.toString() });
 
     case 'transfer': {
-      const target = h.replyTo;
-      if (!target || !target.sender) return [send(h.conv, T.replyToPerson)];
-      if (target.fromThisBot || target.sender.isBot) return [send(h.conv, T.targetIsBot)];
-      if (target.sender.platformUserId === h.sender.platformUserId)
-        return [send(h.conv, T.selfTransfer)];
-      const toUserId = await findUserIdByIdentity(
-        h.ctx.db,
-        h.conv.platform,
-        target.sender.platformUserId,
-      );
+      const target = h.replyTo!.sender!; // checked by transferTargetProblem
+      const toUserId = await findUserIdByIdentity(h.ctx.db, h.conv.platform, target.platformUserId);
       if (toUserId === undefined) return [send(h.conv, T.notRegisteredTarget)];
       const amount = cmd.args.amountCenti;
       const v = await treasuryView(h.ctx, h.userId);
@@ -544,13 +560,13 @@ export async function handleCommand(h: HandlerContext, cmd: ParsedCommand): Prom
       if (v.cashCenti < amount) return [send(h.conv, T.insufficient(v.cashCenti))];
       const rows = await confirm(h, 'transfer', {
         toUserId,
-        toName: target.sender.displayName,
+        toName: target.displayName,
         amount: amount.toString(),
       });
       return [
         send(
           h.conv,
-          `${T.transferPreview(target.sender.displayName, target.sender.platformUserId, amount)}\n${T.confirmPrompt}`,
+          `${T.transferPreview(target.displayName, target.platformUserId, amount)}\n${T.confirmPrompt}`,
           {
             buttons: rows,
           },
@@ -626,16 +642,11 @@ export async function handleCommand(h: HandlerContext, cmd: ParsedCommand): Prom
       return [send(h.conv, text)];
     }
     case 'leaderboard': {
+      // In a group only its own members are ranked; the global list is private-chat only.
       const scope = h.groupId === null ? {} : { groupId: h.groupId };
       const entries = await scaryLeaderboard(h.ctx, { ...scope, limit: 10 });
       const me = await playerFearRank(h.ctx, { userId: h.userId, ...scope });
-      const rows =
-        h.groupId === null ? [] : [[{ label: T.btn.globalBoard, action: 'global_board' }]];
-      return [
-        send(h.conv, T.leaderboard(h.groupId === null ? 'جهانی' : 'این گروه', entries, me), {
-          buttons: await buttons(h, rows),
-        }),
-      ];
+      return [send(h.conv, T.leaderboard(h.groupId === null ? 'global' : 'group', entries, me))];
     }
   }
 }
@@ -666,11 +677,14 @@ export async function handleButton(
         send(h.conv, T.cave(await playerProfile(h.ctx, h.userId), now(h)), { reply: false }),
       ];
     case 'global_board': {
+      // Only on messages sent before the global list became private-chat only.
+      if (h.conv.chatKind !== 'private')
+        return [answer(h.conv, click.callbackId, T.globalBoardInPrivate, true)];
       const entries = await scaryLeaderboard(h.ctx, { limit: 10 });
       const me = await playerFearRank(h.ctx, { userId: h.userId });
       return [
         answer(h.conv, click.callbackId),
-        send(h.conv, T.leaderboard('جهانی', entries, me), { reply: false }),
+        send(h.conv, T.leaderboard('global', entries, me), { reply: false }),
       ];
     }
     case 'equip': {

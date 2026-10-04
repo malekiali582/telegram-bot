@@ -8,9 +8,9 @@
 import { outbox, processedUpdates, transactions } from '@lulu/database';
 import { testBackend } from '@lulu/database/testing';
 import type { BotDeps } from '@lulu/bot';
-import { T, processEvent } from '@lulu/bot';
+import { T, makeButtons, processEvent } from '@lulu/bot';
 import { EventFactory, FakeAdapter } from '@lulu/bot/testing';
-import { findUserIdByIdentity, importGhostBatch } from '@lulu/domain';
+import { findGroupIdByChat, findUserIdByIdentity, importGhostBatch } from '@lulu/domain';
 import type { TestGame } from '@lulu/domain/testing';
 import {
   cashOf,
@@ -240,9 +240,15 @@ describe(`acceptance 13 — amounts and filters (${testBackend()})`, () => {
     await say(G, u, 'لولو'); // 1 point
     const uid = await userIdOf(u);
     await say(G, u, 'واریز گنجینه -50');
-    expect(adapter.last(G.platformChatId)?.text).toBe(T.invalidAmount);
+    expect(adapter.last(G.platformChatId)?.text).toBe(T.amountNegative);
     await say(G, u, 'واریز گنجینه 0');
-    expect(adapter.last(G.platformChatId)?.text).toBe(T.invalidAmount);
+    expect(adapter.last(G.platformChatId)?.text).toBe(T.amountZero);
+    await say(G, u, 'واریز گنجینه ۱۰۰۰۰۰۰۰۰۰۰۰۰۰۰');
+    expect(adapter.last(G.platformChatId)?.text).toBe(T.amountTooLarge);
+    await say(G, u, 'واریز گنجینه ۵۰ تا');
+    expect(adapter.last(G.platformChatId)?.text).toBe(
+      T.amountNotANumber('50 تا', 'واریز گنجینه ۱۰۰'),
+    );
     await say(G, u, 'برداشت گنجینه ۱٫۲۳۴');
     expect(adapter.last(G.platformChatId)?.text).toBe(T.tooPrecise);
     await say(G, u, 'واریز گنجینه ۹۹۹۹۹');
@@ -404,5 +410,135 @@ describe(`acceptance 13 — transfer by reply (${testBackend()})`, () => {
       replyTo: { chatId: G.platformChatId, messageId: '9', sender: bot, fromThisBot: true },
     });
     expect(adapter.last(G.platformChatId)?.text).toBe(T.targetIsBot);
+  });
+});
+
+// Regression (manual test 2026-10-04): every «انتقال …» got only «مبلغ نامعتبر است».
+// The amount was checked before the reply, and the reply never said what was wrong.
+describe(`acceptance 13 — transfer mistakes get a precise answer (${testBackend()})`, () => {
+  const replyTo = (who: Sender) => ({
+    replyTo: { chatId: G.platformChatId, messageId: '77', sender: who, fromThisBot: false },
+  });
+
+  it('accepts ASCII, Persian and grouped amounts when replying to the recipient', async () => {
+    const a = newUser();
+    const b = newUser();
+    await say(G, a, 'لولو');
+    await say(G, b, 'لولو');
+    await grantPoints(game, await userIdOf(a), 5000);
+    for (const text of ['انتقال 50', 'انتقال ۵۰', 'انتقال ٥٠', 'انتقال 1,500', 'انتقال ۱٬۵۰۰']) {
+      await say(G, a, text, replyTo(b));
+      expect(adapter.last(G.platformChatId)?.text, text).toContain(b.displayName);
+      expect(buttonData(G, T.btn.confirm).data, text).toMatch(/^b:/);
+    }
+    await click(G, a, buttonData(G, T.btn.confirm));
+    expect(await cashOf(game, await userIdOf(b))).toBe(100n + 150_000n);
+  });
+
+  it('says a reply is needed (not «invalid amount») when there is none, whatever follows', async () => {
+    const a = newUser();
+    await say(G, a, 'لولو');
+    for (const text of ['انتقال 50', 'انتقال ۵۰ @someone', 'انتقال 50 به علی', 'انتقال صد']) {
+      await say(G, a, text);
+      expect(adapter.last(G.platformChatId)?.text, text).toBe(T.replyToPerson);
+    }
+  });
+
+  it('quotes what was not a number and says the recipient comes from the reply', async () => {
+    const a = newUser();
+    const b = newUser();
+    await say(G, a, 'لولو');
+    await say(G, b, 'لولو');
+    await say(G, a, 'انتقال ۵۰ @someone', replyTo(b));
+    const last = adapter.last(G.platformChatId)!;
+    expect(last.text).toBe(
+      `${T.amountNotANumber('50 @someone', 'انتقال ۱۰۰')}\n${T.transferRecipientByReply}`,
+    );
+    expect(last.text).toContain('«50 @someone» عدد نیست');
+    expect(last.buttons).toBeUndefined();
+    await say(G, a, 'انتقال 0', replyTo(b));
+    expect(adapter.last(G.platformChatId)?.text).toBe(T.amountZero);
+    await say(G, a, 'انتقال -5', replyTo(b));
+    expect(adapter.last(G.platformChatId)?.text).toBe(T.amountNegative);
+    await say(G, a, 'انتقال', replyTo(b));
+    expect(adapter.last(G.platformChatId)?.text).toBe(T.missingArg('انتقال ۱۰۰'));
+  });
+
+  it('escapes and shortens the quoted text', async () => {
+    const a = newUser();
+    const b = newUser();
+    await say(G, a, 'لولو');
+    await say(G, b, 'لولو');
+    await say(G, a, `انتقال <b>${'x'.repeat(100)}</b>`, replyTo(b));
+    const text = adapter.last(G.platformChatId)!.text;
+    expect(text).toContain('&lt;b&gt;');
+    expect(text).not.toContain('<b>x');
+    expect(text).not.toContain('x'.repeat(50));
+  });
+});
+
+// Regression (manual test 2026-10-04): «ترسناک‌ترین لولوها» in a group showed every
+// player of the bot (through a «global» button posted into the group).
+describe(`acceptance 13 — leaderboard scope (${testBackend()})`, () => {
+  const G1 = ev.group('-1002001', 'گروه اول');
+  const G2 = ev.group('-1002002', 'گروه دوم');
+
+  it('ranks only the members of this group; the global list only in private', async () => {
+    const a = newUser(); // plays in G1
+    const b = newUser(); // plays in G2 only
+    const c = newUser(); // in G1, but has only asked for the board there
+    await say(G1, a, 'لولو');
+    await say(G2, b, 'لولو');
+    await say(G1, c, 'ترسناک‌ترین لولوها');
+
+    const inGroup = adapter.last(G1.platformChatId)!;
+    expect(inGroup.text).toContain('— این گروه');
+    expect(inGroup.text).toContain(a.displayName);
+    expect(inGroup.text).toContain(c.displayName);
+    expect(inGroup.text).not.toContain(b.displayName);
+    expect(inGroup.text).toContain(T.globalBoardInPrivate);
+    expect(inGroup.buttons).toBeUndefined();
+
+    await say(G2, b, 'ترسناکترین لولوها');
+    const other = adapter.last(G2.platformChatId)!.text;
+    expect(other).toContain(b.displayName);
+    expect(other).not.toContain(a.displayName);
+    expect(other).not.toContain(c.displayName);
+
+    const P = ev.private(a.platformUserId);
+    await say(P, a, 'ترسناک‌ترین لولوها');
+    const global = adapter.last(P.platformChatId)!.text;
+    expect(global).toContain('— جهانی');
+    expect(global).not.toContain(T.globalBoardInPrivate);
+  });
+
+  it('does not list players who left the group', async () => {
+    const G3 = ev.group('-1002003', 'گروه سوم');
+    const stays = newUser();
+    const leaves = newUser();
+    await say(G3, stays, 'لولو');
+    await say(G3, leaves, 'لولو');
+    await run(ev.event({ type: 'member_change', chat: G3, status: 'left', member: leaves }));
+    await say(G3, stays, 'ترسناک‌ترین لولوها');
+    const text = adapter.last(G3.platformChatId)!.text;
+    expect(text).toContain(stays.displayName);
+    expect(text).not.toContain(leaves.displayName);
+  });
+
+  it('an old «global» button in a group answers privately instead of posting the list', async () => {
+    const a = newUser();
+    await say(G1, a, 'لولو');
+    const groupId = (await findGroupIdByChat(game.ctx.db, 'telegram', G1.platformChatId))!;
+    const [row] = await makeButtons(
+      game.ctx,
+      { userId: await userIdOf(a), groupId, platform: 'telegram', chatId: G1.platformChatId },
+      [[{ label: 'رتبه‌بندی جهانی', action: 'global_board' }]],
+    );
+    const old = row![0]!;
+    if (old.kind !== 'callback') throw new Error('expected a callback button');
+    const sentBefore = adapter.sent.length;
+    const { answer } = await click(G1, a, { data: old.data, messageId: '1' });
+    expect(answer).toMatchObject({ text: T.globalBoardInPrivate, alert: true });
+    expect(adapter.sent.length).toBe(sentBefore);
   });
 });
