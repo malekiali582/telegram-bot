@@ -1,4 +1,4 @@
-import { BP_SCALE, FOOD_KINDS, TOOL_KINDS } from '@lulu/config';
+import { BP_SCALE, FOOD_KINDS } from '@lulu/config';
 import type { FoodKind, GameConfig, ToolKind } from '@lulu/config';
 import { inTransaction, inventory } from '@lulu/database';
 import { sql } from 'drizzle-orm';
@@ -13,9 +13,11 @@ import {
 import { groupBuffs } from './groups.ts';
 import { postTransaction } from './ledger.ts';
 import { beginPlayerAction, touchMembership } from './players.ts';
+import { ownedToolKinds, strongestTool } from './tools.ts';
 
 export interface HuntSituation {
   playerLevel: number;
+  /** The tool in use: always the strongest one the player owns. */
   equippedTool: ToolKind | null;
   huntingGroundLevel: number;
 }
@@ -104,9 +106,6 @@ export function pickPrey(config: GameConfig, situation: HuntSituation, rng: Rng)
   return pickWeighted(plan.rest, rng.int(0, plan.restSum - 1));
 }
 
-const isToolKind = (value: string | null): value is ToolKind =>
-  value !== null && (TOOL_KINDS as readonly string[]).includes(value);
-
 export type HuntResult =
   | { status: 'success'; food: FoodKind; tool: ToolKind; nextAvailableAt: Date }
   | { status: 'failed'; tool: ToolKind; nextAvailableAt: Date }
@@ -116,7 +115,8 @@ export type HuntResult =
   | { status: 'banned' };
 
 /**
- * «شکار» in a group. Without a tool or below the minimum level the player only gets
+ * «شکار» in a group, always with the strongest owned tool. Without a tool or below the
+ * minimum level the player only gets
  * guidance and no cooldown is used. A valid attempt — successful or not — starts the
  * shared hunt cooldown (with this group's «شتاب شکار» buff). Success is rolled first,
  * then the prey type.
@@ -133,8 +133,8 @@ export async function hunt(
     if (player.level < config.hunt.minLevel) {
       return { status: 'level_too_low', minLevel: config.hunt.minLevel };
     }
-    const tool = player.equippedTool;
-    if (!isToolKind(tool)) return { status: 'no_tool' };
+    const tool = strongestTool(config, await ownedToolKinds(tx, input.userId));
+    if (tool === null) return { status: 'no_tool' };
 
     const availableAt = await cooldownAvailableAt(tx, input.userId, 'hunt');
     if (availableAt && isCoolingDown(availableAt, now)) {

@@ -37,15 +37,50 @@ describe('default game config', () => {
     ]);
     expect(c.lolo.cooldownSeconds).toBe(300);
     expect(c.hunt.cooldownSeconds).toBe(3600);
-    expect(c.food).toEqual({
-      pointsPerNutritionPerSecond: 5,
-      mealDurationSeconds: 1800,
-      claimWindowSeconds: 300,
-    });
+    expect(c.food).toEqual({ mealDurationSeconds: 1800, depositIntervalSeconds: 300 });
     expect(c.cemetery.openCost).toBe(1000);
     expect(c.treasury.dailyInterestBp).toBe(300);
-    expect(c.ghosts.dailyLimit).toBe(3);
-    expect(c.foods.human).toEqual({ nutrition: 50, minLevel: 6, requiredTool: 'magic_wand' });
+    expect(c.foods.human).toEqual({
+      nutrition: 50,
+      pointsPerDeposit: 1000,
+      minLevel: 6,
+      requiredTool: 'magic_wand',
+    });
+  });
+
+  it('pays the owner food deposits, in food order, every 5 minutes for 30 minutes', () => {
+    const c = DEFAULT_GAME_CONFIG;
+    expect(FOOD_KINDS.map((f) => c.foods[f].pointsPerDeposit)).toEqual([
+      3, 20, 70, 150, 270, 360, 500, 1000,
+    ]);
+    expect(c.food.mealDurationSeconds / c.food.depositIntervalSeconds).toBe(6);
+  });
+
+  it('has the daily streak reward: 10, +5 a day up to day 30 (155), 100 per active member up to 20', () => {
+    expect(DEFAULT_GAME_CONFIG.streak).toEqual({
+      baseReward: 10,
+      dailyIncrement: 5,
+      maxDays: 30,
+      groupRewardPerMember: 100,
+      groupMemberCap: 20,
+      minAccountAgeDays: 3,
+    });
+    for (const key of Object.keys(DEFAULT_GAME_CONFIG.streak)) {
+      expect(labelOf(`streak.${key}`), key).toBe('suggested');
+    }
+  });
+
+  it('has the owner ghost rules: 10 attempts 10 minutes apart, 3 ghosts, 50 per member', () => {
+    expect(DEFAULT_GAME_CONFIG.ghosts).toMatchObject({
+      baseChanceBp: 3000,
+      failureStepBp: 100,
+      dailyLimit: 3,
+      dailyAttempts: 10,
+      cooldownSeconds: 600,
+      rewardPerMember: 50,
+      memberActivityWindowDays: 7,
+      replyDeadlineHours: 24,
+    });
   });
 
   it('has hunting-ground rows that sum to exactly 100% with human at 0.5% / 3%', () => {
@@ -111,6 +146,14 @@ describe('game config validation', () => {
     ghost.ghosts.minChanceBp = 4000;
     expect(issuesOf(ghost)).toContainEqual(expect.stringContaining('ghosts.minChanceBp'));
 
+    const attempts = clone();
+    attempts.ghosts.dailyAttempts = 2;
+    expect(issuesOf(attempts)).toContainEqual(expect.stringContaining('ghosts.dailyLimit'));
+
+    const meal = clone();
+    meal.food.depositIntervalSeconds = 700;
+    expect(issuesOf(meal)).toContainEqual(expect.stringContaining('food.depositIntervalSeconds'));
+
     const bank = clone();
     bank.bloodBank.levels[1]!.maxCurseLevel = 9;
     expect(issuesOf(bank)).toContainEqual(expect.stringContaining('maxCurseLevel'));
@@ -153,10 +196,14 @@ describe('fixed / suggested labels', () => {
     for (const path of [
       'lolo.cooldownSeconds',
       'levels[3].rewardMax',
-      'food.pointsPerNutritionPerSecond',
+      'food.depositIntervalSeconds',
+      'foods.deer.pointsPerDeposit',
       'cemetery.openCost',
       'treasury.dailyInterestBp',
       'ghosts.dailyLimit',
+      'ghosts.dailyAttempts',
+      'ghosts.cooldownSeconds',
+      'ghosts.rewardPerMember',
     ]) {
       expect(labelOf(path), path).toBe('fixed');
     }
@@ -165,7 +212,7 @@ describe('fixed / suggested labels', () => {
       'tools.magic_wand.price',
       'huntingGrounds[4].weightsBp.human',
       'cemetery.upgradeCosts[2]',
-      'ghosts.fearMax',
+      'ghosts.cityLevelBonusBp',
     ]) {
       expect(labelOf(path), path).toBe('suggested');
     }

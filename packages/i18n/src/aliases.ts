@@ -51,7 +51,7 @@ export const COMMANDS = {
   leaderboard: {
     aliases: ['ترسناک‌ترین لولوها', 'ترسناکترین لولوها'],
     args: 'none',
-    help: 'رتبه‌بندی ترس',
+    help: 'رتبه‌بندی بر اساس لولوپوینت',
     helpGroup: 'basics',
   },
   help: { aliases: ['راهنما'], args: 'none', help: 'همین راهنما', helpGroup: 'basics' },
@@ -59,19 +59,13 @@ export const COMMANDS = {
   tool_shop: {
     aliases: ['ابزار شکار', 'ابزارها'],
     args: 'none',
-    help: 'فروشگاه و تجهیز ابزار',
+    help: 'فروشگاه ابزار (قوی‌ترین ابزار خودکار استفاده می‌شود)',
     helpGroup: 'hunt',
   },
   tool_buy: {
     aliases: ['خرید ابزار', 'خرید'],
     args: 'tool',
     help: 'خرید ابزار: «خرید چاقو»',
-    helpGroup: 'hunt',
-  },
-  tool_equip: {
-    aliases: ['تجهیز ابزار', 'تجهیز'],
-    args: 'tool',
-    help: 'تجهیز ابزار: «تجهیز تبر»',
     helpGroup: 'hunt',
   },
   hunt: { aliases: ['شکار'], args: 'none', help: 'تلاش شکار (هر ساعت)', helpGroup: 'hunt' },

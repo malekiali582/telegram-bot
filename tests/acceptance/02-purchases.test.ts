@@ -2,10 +2,18 @@
  * Acceptance 2 (spec §19.2): insufficient funds, and no duplicate purchase or upgrade
  * under concurrent or repeated requests.
  */
-import { ledgerEntries, ownedTools, playerState } from '@lulu/database';
+import { ledgerEntries, ownedTools } from '@lulu/database';
 import { queryRows } from '@lulu/database';
 import { testBackend } from '@lulu/database/testing';
-import { buyTool, equipTool, previewLevelUpgrade, upgradeLevel } from '@lulu/domain';
+import {
+  buyTool,
+  hunt,
+  playerProfile,
+  previewLevelUpgrade,
+  strongestTool,
+  toolShop,
+  upgradeLevel,
+} from '@lulu/domain';
 import type { TestGame } from '@lulu/domain/testing';
 import {
   TEST_START,
@@ -13,9 +21,11 @@ import {
   createTestGame,
   grantPoints,
   levelOf,
+  newGroup,
   newPlayer,
   setLevel,
 } from '@lulu/domain/testing';
+import { DEFAULT_GAME_CONFIG } from '@lulu/config';
 import { count, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -139,7 +149,7 @@ describe(`acceptance 2 — hunting tools (${testBackend()})`, () => {
     await grantPoints(game, userId, 4_000_000);
     expect(await buyTool(game.ctx, { userId, tool: 'magic_wand' })).toMatchObject({
       status: 'ok',
-      equipped: true,
+      inUse: 'magic_wand',
       cashCenti: 0n,
     });
   });
@@ -170,24 +180,37 @@ describe(`acceptance 2 — hunting tools (${testBackend()})`, () => {
     expect(await cashOf(game, userId)).toBe(250_000n);
   });
 
-  it('equips only owned tools, one at a time; later purchases do not re-equip', async () => {
+  it('always uses the strongest owned tool: a better purchase replaces it at once', async () => {
     const userId = await newPlayer(game);
-    await grantPoints(game, userId, 8_000);
-    expect(await buyTool(game.ctx, { userId, tool: 'knife' })).toMatchObject({ equipped: true });
-    expect(await buyTool(game.ctx, { userId, tool: 'axe' })).toMatchObject({ equipped: false });
-    expect(await equipTool(game.ctx, { userId, tool: 'sword' })).toEqual({
-      status: 'not_owned',
+    await setLevel(game, userId, 2);
+    await grantPoints(game, userId, 63_000);
+    expect(await buyTool(game.ctx, { userId, tool: 'knife' })).toMatchObject({ inUse: 'knife' });
+    expect(await buyTool(game.ctx, { userId, tool: 'sword' })).toMatchObject({ inUse: 'sword' });
+    // a weaker tool bought later never replaces a stronger one
+    expect(await buyTool(game.ctx, { userId, tool: 'axe' })).toMatchObject({ inUse: 'sword' });
+
+    const profile = await playerProfile(game.ctx, userId);
+    expect(profile.tools).toEqual({ owned: ['knife', 'axe', 'sword'], equipped: 'sword' });
+    const shop = await toolShop(game.ctx, userId);
+    expect(shop.items.filter((i) => i.equipped).map((i) => i.tool)).toEqual(['sword']);
+
+    game.rng.push(7_999, 0); // success under the sword's 80 % (not under the axe's 70 %)
+    expect(await hunt(game.ctx, { userId, groupId: await newGroup(game) })).toMatchObject({
+      status: 'success',
       tool: 'sword',
     });
-    expect(await equipTool(game.ctx, { userId, tool: 'axe' })).toEqual({
-      status: 'ok',
-      tool: 'axe',
-    });
-    const [row] = await game.ctx.db
-      .select({ tool: playerState.equippedTool })
-      .from(playerState)
-      .where(eq(playerState.userId, userId));
-    expect(row?.tool).toBe('axe');
+  });
+
+  it('ranks tools by success chance, then price, then list order', () => {
+    const c = structuredClone(DEFAULT_GAME_CONFIG);
+    expect(strongestTool(c, [])).toBeNull();
+    expect(strongestTool(c, ['bow', 'knife'])).toBe('bow');
+    c.tools.knife.successBp = 9_500; // a config change re-ranks
+    expect(strongestTool(c, ['bow', 'knife'])).toBe('knife');
+    c.tools.knife.successBp = 9_000;
+    expect(strongestTool(c, ['bow', 'knife'])).toBe('bow'); // tie: the dearer one
+    c.tools.knife.price = c.tools.bow.price;
+    expect(strongestTool(c, ['bow', 'knife'])).toBe('bow'); // full tie: later in the list
   });
 });
 

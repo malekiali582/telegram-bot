@@ -10,7 +10,12 @@ import { testBackend } from '@lulu/database/testing';
 import type { BotDeps } from '@lulu/bot';
 import { T, makeButtons, processEvent } from '@lulu/bot';
 import { EventFactory, FakeAdapter } from '@lulu/bot/testing';
-import { findGroupIdByChat, findUserIdByIdentity, importGhostBatch } from '@lulu/domain';
+import {
+  findGroupIdByChat,
+  findUserIdByIdentity,
+  importGhostBatch,
+  scaryLeaderboard,
+} from '@lulu/domain';
 import type { TestGame } from '@lulu/domain/testing';
 import {
   cashOf,
@@ -145,11 +150,13 @@ describe(`acceptance 13 — buttons (${testBackend()})`, () => {
     expect(await levelOf(game, await userIdOf(owner))).toBe(2);
   });
 
-  it('refuses an expired button', async () => {
+  it('refuses an expired confirmation, saying how long it was valid', async () => {
     const u = newUser();
     const { confirm } = await upgradePreview(u);
     game.clock.advanceSeconds(120);
-    expect((await click(G, u, confirm)).answer).toMatchObject({ text: T.button.expired });
+    const { answer } = await click(G, u, confirm);
+    expect(answer).toMatchObject({ text: T.button.expired(120), alert: true });
+    expect(answer?.text).toContain('۲ دقیقه');
     expect(await levelOf(game, await userIdOf(u))).toBe(1);
   });
 
@@ -477,39 +484,53 @@ describe(`acceptance 13 — transfer mistakes get a precise answer (${testBacken
   });
 });
 
-// Regression (manual test 2026-10-04): «ترسناک‌ترین لولوها» in a group showed every
-// player of the bot (through a «global» button posted into the group).
+// Regression (manual tests 2026-10-04 and 2026-10-10): «ترسناک‌ترین لولوها» in a group
+// showed every player of the bot. Now: this group's members ranked by lolopoints, and
+// under them the bot-wide top three.
 describe(`acceptance 13 — leaderboard scope (${testBackend()})`, () => {
   const G1 = ev.group('-1002001', 'گروه اول');
   const G2 = ev.group('-1002002', 'گروه دوم');
+  /** The group's own list, the bot-wide top three, and their names. */
+  const parts = (text: string) => {
+    const [own = '', global = ''] = text.split('🌍');
+    return { own, global };
+  };
+  const line = (displayName: string) => new RegExp(`<b>${displayName}</b> — `);
 
-  it('ranks only the members of this group; the global list only in private', async () => {
+  it('ranks only the members of this group, then shows the bot-wide top three', async () => {
     const a = newUser(); // plays in G1
     const b = newUser(); // plays in G2 only
     const c = newUser(); // in G1, but has only asked for the board there
     await say(G1, a, 'لولو');
     await say(G2, b, 'لولو');
+    await grantPoints(game, await userIdOf(a), 70);
     await say(G1, c, 'ترسناک‌ترین لولوها');
 
     const inGroup = adapter.last(G1.platformChatId)!;
-    expect(inGroup.text).toContain('— این گروه');
-    expect(inGroup.text).toContain(a.displayName);
-    expect(inGroup.text).toContain(c.displayName);
-    expect(inGroup.text).not.toContain(b.displayName);
-    expect(inGroup.text).toContain(T.globalBoardInPrivate);
+    const { own, global } = parts(inGroup.text);
+    expect(own).toContain('— این گروه');
+    expect(own).toMatch(line(a.displayName));
+    expect(own).toMatch(line(c.displayName));
+    expect(own).not.toMatch(line(b.displayName));
+    expect(own.search(line(a.displayName))).toBeLessThan(own.search(line(c.displayName))); // 71 > 0
+    expect(own).toContain('۷۱ پوینت');
+    const top3 = await scaryLeaderboard(game.ctx, { limit: 3 });
+    expect(top3).toHaveLength(3);
+    for (const e of top3) expect(global).toMatch(line(e.displayName));
+    expect(global.trim().split('\n')).toHaveLength(5); // title, three players, the note
     expect(inGroup.buttons).toBeUndefined();
 
     await say(G2, b, 'ترسناکترین لولوها');
-    const other = adapter.last(G2.platformChatId)!.text;
-    expect(other).toContain(b.displayName);
-    expect(other).not.toContain(a.displayName);
-    expect(other).not.toContain(c.displayName);
+    const other = parts(adapter.last(G2.platformChatId)!.text).own;
+    expect(other).toMatch(line(b.displayName));
+    expect(other).not.toMatch(line(a.displayName));
+    expect(other).not.toMatch(line(c.displayName));
 
     const P = ev.private(a.platformUserId);
     await say(P, a, 'ترسناک‌ترین لولوها');
-    const global = adapter.last(P.platformChatId)!.text;
-    expect(global).toContain('— جهانی');
-    expect(global).not.toContain(T.globalBoardInPrivate);
+    const inPrivate = adapter.last(P.platformChatId)!.text;
+    expect(inPrivate).toContain('— کل ربات');
+    expect(inPrivate).not.toContain('🌍');
   });
 
   it('does not list players who left the group', async () => {
@@ -520,12 +541,12 @@ describe(`acceptance 13 — leaderboard scope (${testBackend()})`, () => {
     await say(G3, leaves, 'لولو');
     await run(ev.event({ type: 'member_change', chat: G3, status: 'left', member: leaves }));
     await say(G3, stays, 'ترسناک‌ترین لولوها');
-    const text = adapter.last(G3.platformChatId)!.text;
-    expect(text).toContain(stays.displayName);
-    expect(text).not.toContain(leaves.displayName);
+    const { own } = parts(adapter.last(G3.platformChatId)!.text);
+    expect(own).toMatch(line(stays.displayName));
+    expect(own).not.toMatch(line(leaves.displayName));
   });
 
-  it('an old «global» button in a group answers privately instead of posting the list', async () => {
+  it('an old «global» button posts nothing and says it is no longer valid', async () => {
     const a = newUser();
     await say(G1, a, 'لولو');
     const groupId = (await findGroupIdByChat(game.ctx.db, 'telegram', G1.platformChatId))!;
@@ -538,7 +559,118 @@ describe(`acceptance 13 — leaderboard scope (${testBackend()})`, () => {
     if (old.kind !== 'callback') throw new Error('expected a callback button');
     const sentBefore = adapter.sent.length;
     const { answer } = await click(G1, a, { data: old.data, messageId: '1' });
-    expect(answer).toMatchObject({ text: T.globalBoardInPrivate, alert: true });
+    expect(answer).toMatchObject({ text: T.button.invalid, alert: true });
     expect(adapter.sent.length).toBe(sentBefore);
+  });
+});
+
+// Regression (manual test 2026-10-10): every button worked only right after /start. All
+// buttons expired after 120 s and pressing one used up the others of its message, so
+// «راهنما» after «غار من» said «already used». Menu buttons now never expire.
+describe(`acceptance 13 — menu buttons stay usable (${testBackend()})`, () => {
+  const startMenu = async (chat: ChatRef, who: Sender) => {
+    await say(chat, who, '/start');
+    return { help: buttonData(chat, T.btn.help), cave: buttonData(chat, T.btn.cave) };
+  };
+
+  it('help and my cave work in any order, again and again, days later', async () => {
+    const u = newUser();
+    const P = ev.private(u.platformUserId);
+    const { help, cave } = await startMenu(P, u);
+    const helpText = 'راهنمای لولو';
+    for (const button of [cave, help, help, cave]) {
+      const before = adapter.sent.length;
+      const { answer } = await click(P, u, button);
+      expect(answer?.alert).toBeFalsy();
+      expect(adapter.sent.length).toBe(before + 1);
+    }
+    expect(adapter.textsIn(P.platformChatId).filter((t) => t.includes(helpText))).toHaveLength(2);
+    game.clock.advanceSeconds(3 * 86_400);
+    const { answer } = await click(P, u, help);
+    expect(answer?.alert).toBeFalsy();
+    expect(adapter.last(P.platformChatId)?.text).toContain(helpText);
+  });
+
+  it("in a group, anyone may press help; my cave stays its owner's", async () => {
+    const owner = newUser();
+    const other = newUser();
+    await say(G, other, 'لولو');
+    const { help, cave } = await startMenu(G, owner);
+    await click(G, other, help);
+    expect(adapter.last(G.platformChatId)?.text).toContain('راهنمای لولو');
+    expect((await click(G, other, cave)).answer).toMatchObject({
+      text: T.button.notYours,
+      alert: true,
+    });
+    await click(G, owner, cave);
+    expect(adapter.last(G.platformChatId)?.text).toContain(owner.displayName);
+  });
+
+  it('a shop «buy» button keeps working; only the confirmation it opens expires', async () => {
+    const u = newUser();
+    await say(G, u, 'لولو');
+    await grantPoints(game, await userIdOf(u), 1_000);
+    await say(G, u, 'ابزار شکار');
+    const shop = adapter.last(G.platformChatId)!;
+    expect(shop.text).toContain('قوی‌ترین ابزار');
+    const labels = (shop.buttons ?? []).flat().map((b) => b.label);
+    expect(labels.some((l) => l.startsWith('تجهیز'))).toBe(false);
+    const buyKnife = buttonData(G, 'خرید چاقو');
+
+    await click(G, u, buyKnife);
+    const firstConfirm = buttonData(G, T.btn.confirm);
+    game.clock.advanceSeconds(600);
+    expect((await click(G, u, firstConfirm)).answer).toMatchObject({
+      text: T.button.expired(120),
+    });
+    await click(G, u, buyKnife); // the menu message was not replaced and still works
+    await click(G, u, buttonData(G, T.btn.confirm));
+    expect(adapter.edits[adapter.edits.length - 1]?.text).toBe(T.toolOk('knife', 'knife'));
+  });
+
+  it('«تجهیز …» is no longer a command', async () => {
+    const u = newUser();
+    expect(await say(G, u, 'تجهیز چاقو')).toBe('ignored');
+  });
+});
+
+// Regression (manual test 2026-10-10): in a basic (non-super) group the bot seemed to
+// answer only replies to its own messages. The bot core treats both kinds alike; if
+// Telegram does not deliver plain messages, Group Privacy is on (logged at startup).
+describe(`acceptance 13 — basic groups (${testBackend()})`, () => {
+  it('answers a plain «لولو» that is not a reply, in a basic group and a supergroup', async () => {
+    for (const chat of [
+      ev.group('-4100', 'گروه ساده'),
+      { platformChatId: '-1004100', kind: 'supergroup', title: 'سوپرگروه' } as ChatRef,
+    ]) {
+      const u = newUser();
+      expect(await say(chat, u, 'لولو')).toBe('processed');
+      expect(adapter.last(chat.platformChatId)?.text).toContain('لولو کرد');
+      expect(await cashOf(game, await userIdOf(u))).toBe(100n);
+    }
+  });
+});
+
+// The owner rule of 2026-10-10: «شنیدم» pays every active member of the group.
+describe(`acceptance 13 — ghost reward for the group (${testBackend()})`, () => {
+  it('tells the group how many members were paid', async () => {
+    const chat = ev.group('-4200', 'گروه روح');
+    const finder = newUser();
+    const member = newUser();
+    await say(chat, member, 'لولو');
+    await say(chat, finder, 'جستجوی روح');
+    const ghostMsg = adapter.last(chat.platformChatId)!;
+    expect(ghostMsg.text).toContain('هر عضو فعال این گروه');
+    const before = await cashOf(game, await userIdOf(member));
+    await say(chat, finder, 'شنیدم', {
+      replyTo: {
+        chatId: chat.platformChatId,
+        messageId: ghostMsg.messageId,
+        sender: null,
+        fromThisBot: true,
+      },
+    });
+    expect(adapter.last(chat.platformChatId)?.text).toBe(T.heardOk(finder.displayName, 5_000n, 2));
+    expect(await cashOf(game, await userIdOf(member))).toBe(before + 5_000n);
   });
 });

@@ -170,15 +170,11 @@ export async function foodOf(game: TestGame, userId: number, food: FoodKind): Pr
   return row?.quantity ?? 0;
 }
 
-/** Buys and equips a tool with freshly granted points. */
+/** Buys a tool with freshly granted points; hunting uses the strongest one owned. */
 export async function giveTool(game: TestGame, userId: number, tool: ToolKind): Promise<void> {
   await grantPoints(game, userId, await priceOf(game, tool));
   const bought = await buyTool(game.ctx, { userId, tool });
   if (bought.status !== 'ok') throw new Error(`could not buy ${tool}: ${bought.status}`);
-  await game.ctx.db
-    .update(playerState)
-    .set({ equippedTool: tool })
-    .where(eq(playerState.userId, userId));
 }
 
 async function priceOf(game: TestGame, tool: ToolKind): Promise<number> {

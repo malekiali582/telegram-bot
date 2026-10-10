@@ -42,16 +42,12 @@ export const LABEL_RULES: readonly LabelRule[] = [
   fixed('levels[].mealCapacity', 'ظرفیت وعدهٔ هم‌زمان فعال', '§5, §2.6'),
   suggested('levels[].upgradeCost', 'هزینهٔ رفتن به سطح بعد (پوینت)', '§5'),
 
-  fixed(
-    'food.pointsPerNutritionPerSecond',
-    'پوینت در ثانیه به ازای هر واحد ارزش غذایی',
-    '§9, §2.2',
-  ),
   fixed('food.mealDurationSeconds', 'مدت فعال بودن هر وعده (ثانیه)', '§9, §2.2'),
-  fixed('food.claimWindowSeconds', 'بیشینهٔ پنجرهٔ دریافت پاداش غذا (ثانیه)', '§9, §2.3'),
+  fixed('food.depositIntervalSeconds', 'فاصلهٔ واریزهای خودکار هر وعده (ثانیه)', '§9, §2.2'),
 
   suggested('foods.human.nutrition', 'ارزش غذایی انسان', '§8, §2.4'),
-  fixed('foods.*.nutrition', 'ارزش غذایی', '§8'),
+  fixed('foods.*.nutrition', 'ارزش غذایی (برای اهدای شکار)', '§8'),
+  fixed('foods.*.pointsPerDeposit', 'پوینت هر واریز خودکار یک وعده از این غذا', '§9'),
   fixed('foods.*.minLevel', 'حداقل سطح شخصیت برای شکار این غذا', '§8'),
   fixed('foods.*.requiredTool', 'ابزار لازم برای شکار این غذا', '§8'),
 
@@ -87,17 +83,37 @@ export const LABEL_RULES: readonly LabelRule[] = [
 
   fixed('ghosts.baseChanceBp', 'شانس پایهٔ پیدا کردن روح در آبادی سطح ۱ (bp)', '§12, §2.1'),
   suggested('ghosts.cityLevelBonusBp', 'افزایش شانس روح به ازای هر سطح آبادی (bp)', '§12'),
-  fixed('ghosts.failureMultiplierBp', 'ضریب شانس پس از هر شکست متوالی (bp)', '§12'),
+  fixed('ghosts.failureStepBp', 'کاهش شانس پس از هر شکست متوالی (bp)', '§12'),
   fixed('ghosts.minChanceBp', 'کف شانس پیدا کردن روح (bp)', '§12'),
   fixed('ghosts.dailyLimit', 'سقف روح پیداشده در روز تهران، در مجموع گروه‌ها', '§12'),
-  suggested('ghosts.cooldownSeconds', 'زمان انتظار بین تلاش‌های جست‌وجوی روح (ثانیه)', '§12'),
-  suggested('ghosts.fearMin', 'کمینهٔ پاداش ترس هر روح', '§12'),
-  suggested('ghosts.fearMax', 'بیشینهٔ پاداش ترس هر روح', '§12'),
-  suggested('ghosts.replyDeadlineHours', 'مهلت پاسخ «شنیدم» از لحظهٔ کشف (ساعت)', '§12'),
+  fixed('ghosts.dailyAttempts', 'سقف تلاش جست‌وجوی روح در روز تهران، در مجموع گروه‌ها', '§12'),
+  fixed('ghosts.cooldownSeconds', 'زمان انتظار بین تلاش‌های جست‌وجوی روح (ثانیه)', '§12'),
+  fixed('ghosts.rewardPerMember', 'پاداش «شنیدم» برای هر عضو فعال گروه (پوینت)', '§12'),
+  fixed('ghosts.memberActivityWindowDays', 'بازهٔ فعالیت «عضو» برای پاداش روح (روز)', '§12'),
+  fixed('ghosts.replyDeadlineHours', 'مهلت پاسخ «شنیدم» از لحظهٔ کشف (ساعت)', '§12'),
   fixed('ghosts.batchSize', 'تعداد متن هر بستهٔ روزانه', '§13'),
 
   fixed('treasury.dailyInterestBp', 'سود مرکب روزانهٔ گنجینه در نیمه‌شب تهران (bp)', '§14'),
   fixed('transfer.feeBp', 'کارمزد انتقال بین بازیکنان (bp)', '§14'),
+
+  suggested('streak.baseReward', 'پاداش استریک شخصی در روز اول (پوینت)', '§14-B'),
+  suggested(
+    'streak.dailyIncrement',
+    'افزایش پاداش استریک به ازای هر روز پشت‌سرهم (پوینت)',
+    '§14-B',
+  ),
+  suggested('streak.maxDays', 'روزی که پاداش استریک بعد از آن ثابت می‌ماند', '§14-B'),
+  suggested(
+    'streak.groupRewardPerMember',
+    'پاداش گروهی به ازای هر عضو فعال آن روز (پوینت)',
+    '§14-B',
+  ),
+  suggested('streak.groupMemberCap', 'سقف تعداد اعضای فعال در پاداش گروهی', '§14-B'),
+  suggested(
+    'streak.minAccountAgeDays',
+    'حداقل روز از اولین لولو تا شمرده شدن در اعضای فعال',
+    '§14-B',
+  ),
 
   suggested('confirmations.ttlSeconds', 'مهلت دکمه‌های تأیید (ثانیه)', 'B-2'),
   suggested('admin.*', 'تنظیمات ورود و نشست پنل', 'B-2'),

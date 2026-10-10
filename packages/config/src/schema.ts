@@ -29,7 +29,10 @@ const playerLevelSchema = z.strictObject({
 });
 
 const foodSchema = z.strictObject({
+  /** Value of one item for «اهدای شکار» (the group's hunt-point pool). */
   nutrition: z.int().min(1),
+  /** Points paid into cash at every deposit of one meal of this food. */
+  pointsPerDeposit: positivePoints,
   minLevel: level,
   requiredTool: z.enum(TOOL_KINDS).nullable(),
 });
@@ -78,9 +81,9 @@ export const gameConfigSchema = z
     }),
     levels: z.array(playerLevelSchema).min(2),
     food: z.strictObject({
-      pointsPerNutritionPerSecond: z.int().min(1),
       mealDurationSeconds: seconds,
-      claimWindowSeconds: seconds,
+      /** A meal pays `pointsPerDeposit` at the end of every interval it is active. */
+      depositIntervalSeconds: seconds,
     }),
     foods: kindRecord(FOOD_KINDS, foodSchema),
     tools: kindRecord(TOOL_KINDS, toolSchema),
@@ -110,12 +113,18 @@ export const gameConfigSchema = z
     ghosts: z.strictObject({
       baseChanceBp: bp,
       cityLevelBonusBp: bp,
-      failureMultiplierBp: bp,
+      /** Subtracted from the chance after every consecutive failure (linear). */
+      failureStepBp: bp,
       minChanceBp: bp,
+      /** Ghosts found per Tehran day, across all groups. */
       dailyLimit: z.int().min(1).max(100),
+      /** Search attempts per Tehran day, across all groups. */
+      dailyAttempts: z.int().min(1).max(1000),
       cooldownSeconds: seconds,
-      fearMin: z.int().min(0),
-      fearMax: z.int().min(0),
+      /** Paid to every active member of the group when the finder answers «شنیدم». */
+      rewardPerMember: positivePoints,
+      /** «Member» = successful activity in that group within this many days. */
+      memberActivityWindowDays: z.int().min(1).max(365),
       replyDeadlineHours: z
         .int()
         .min(1)
@@ -124,6 +133,21 @@ export const gameConfigSchema = z
     }),
     treasury: z.strictObject({
       dailyInterestBp: bp,
+    }),
+    /** Daily group-activity reward with a per-group streak, paid at Tehran midnight. */
+    streak: z.strictObject({
+      /** Personal reward on the first day of a streak. */
+      baseReward: points,
+      /** Added for every further consecutive day… */
+      dailyIncrement: points,
+      /** …up to this streak day; later days pay the same as this one. */
+      maxDays: z.int().min(1).max(3650),
+      /** Group reward per active member of the group that day… */
+      groupRewardPerMember: points,
+      /** …counting at most this many members. */
+      groupMemberCap: z.int().min(0).max(10_000),
+      /** Accounts count as active members only this many Tehran days after their first lolo. */
+      minAccountAgeDays: z.int().min(0).max(365),
     }),
     transfer: z.strictObject({
       feeBp: bp,
@@ -162,8 +186,8 @@ export const gameConfigSchema = z
       }
     });
 
-    if (c.food.claimWindowSeconds > c.food.mealDurationSeconds) {
-      issue(['food', 'claimWindowSeconds'], 'claim window cannot exceed meal duration');
+    if (c.food.mealDurationSeconds % c.food.depositIntervalSeconds !== 0) {
+      issue(['food', 'depositIntervalSeconds'], 'meal duration must be a multiple of the interval');
     }
 
     for (const kind of FOOD_KINDS) {
@@ -232,7 +256,9 @@ export const gameConfigSchema = z
     if (g.baseChanceBp + g.cityLevelBonusBp * (maxCityLevel - 1) > BP_SCALE) {
       issue(['ghosts', 'cityLevelBonusBp'], 'chance exceeds 100% at max city level');
     }
-    if (g.fearMin > g.fearMax) issue(['ghosts', 'fearMin'], 'fearMin > fearMax');
+    if (g.dailyLimit > g.dailyAttempts) {
+      issue(['ghosts', 'dailyLimit'], 'more ghosts per day than search attempts');
+    }
   });
 
 export type GameConfig = z.infer<typeof gameConfigSchema>;

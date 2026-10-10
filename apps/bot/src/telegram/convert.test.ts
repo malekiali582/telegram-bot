@@ -30,6 +30,21 @@ describe('Telegram update → normalized events', () => {
     });
   });
 
+  // Regression (manual test 2026-10-10): in a basic group the bot seemed to answer only
+  // replies. A plain message there converts like in a supergroup; whether Telegram sends
+  // it at all is Group Privacy (see logGroupPrivacy).
+  it('maps a plain message in a basic group, without any reply', () => {
+    const basic = { id: -4812, type: 'group' as const, title: 'گروه کوچک' };
+    const event = one({ message: { ...base, chat: basic, from: alice, text: 'لولو' } });
+    expect(event).toMatchObject({
+      type: 'text',
+      chat: { platformChatId: '-4812', kind: 'group', title: 'گروه کوچک' },
+      text: 'لولو',
+      sender: { platformUserId: '42' },
+    });
+    expect(event).not.toHaveProperty('replyTo');
+  });
+
   it('marks edited, forwarded and bot-sent messages', () => {
     expect(
       one({ edited_message: { ...base, from: alice, text: 'لولو', edit_date: 1 } }),

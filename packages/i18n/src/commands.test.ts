@@ -130,7 +130,9 @@ describe('commands with arguments', () => {
       command: 'tool_buy',
       args: { tool: 'bow' },
     });
-    expect(cmd('تجهیز چاقو')).toMatchObject({ command: 'tool_equip', args: { tool: 'knife' } });
+    // Equipping is automatic (the strongest owned tool), so there is no such command.
+    expect(cmd('تجهیز چاقو')).toBeNull();
+    expect(cmd('تجهیز ابزار تبر')).toBeNull();
     expect(cmd('خرید موشک')).toMatchObject({ kind: 'invalid', problem: 'unknown_item' });
   });
 });

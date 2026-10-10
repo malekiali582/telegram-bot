@@ -3,12 +3,14 @@ import { ledgerEntries, transactions, wallets } from '@lulu/database';
 import { and, eq } from 'drizzle-orm';
 import { DomainError } from './context.ts';
 
-/** Source (mint), sink (burn) and adjustment accounts, seeded by migration 0001. */
+/** Source (mint), sink (burn) and adjustment accounts, seeded by migrations 0001, 0005 and 0006. */
 export type SystemWalletCode =
   | 'mint:lolo'
   | 'mint:food'
   | 'mint:cemetery'
   | 'mint:interest'
+  | 'mint:ghost'
+  | 'mint:streak'
   | 'burn:level_upgrade'
   | 'burn:tool'
   | 'burn:cemetery'

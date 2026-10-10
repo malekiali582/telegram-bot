@@ -68,8 +68,16 @@ function describe(err: unknown): string {
 // ── 1. Telegram ──
 say('\n۱) تلگرام');
 try {
-  const me = await telegram<{ username: string }>('getMe');
+  const me = await telegram<{ username: string; can_read_all_group_messages?: boolean }>('getMe');
   ok(`توکن معتبر است و مال ربات @${me.username} است. مطمئن شوید به همین ربات پیام می‌دهید.`);
+  if (me.can_read_all_group_messages) {
+    ok('Group Privacy خاموش است: تلگرام پیام سادهٔ «لولو» را در گروه‌ها به ربات می‌دهد.');
+  } else {
+    bad(
+      `Group Privacy برای @${me.username} هنوز روشن است (طبق getMe). در گروه‌هایی که ربات ادمین نیست، فقط دستورهای «/» و reply به پیام‌های ربات می‌رسد.\n` +
+        '     در BotFather: /setprivacy ← همین ربات ← Disable. بعد ربات را از گروه حذف و دوباره اضافه کنید (یا ادمینش کنید).',
+    );
+  }
   const info = await telegram<{
     url: string;
     pending_update_count: number;

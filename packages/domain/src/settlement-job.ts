@@ -7,9 +7,11 @@ import { tehranDate } from './tehran.ts';
 // ───────────────────────── worker entry point ─────────────────────────
 
 /**
- * One batch of the periodic settlement job: players with a cemetery, or with a
- * treasury balance and an unsettled midnight. Keyset-paged by user id. Safe to run
- * late, twice, or alongside player actions (same lock, same idempotent settlement).
+ * One batch of the periodic settlement job: players with a cemetery, with a treasury
+ * balance and an unsettled midnight, with a food deposit that has come due, or with a
+ * finished streak day not yet paid.
+ * Keyset-paged by user id. Safe to run late, twice, or alongside player actions (same
+ * lock, same idempotent settlement).
  */
 export async function settleDuePlayers(
   ctx: DomainContext,
@@ -28,7 +30,16 @@ export async function settleDuePlayers(
         WHERE p.user_id > ${after}
           AND (c.accrued_until < ${now.toISOString()}::timestamptz
                OR (w.balance > 0 AND (p.interest_settled_through IS NULL
-                                       OR p.interest_settled_through < ${today}::date)))
+                                       OR p.interest_settled_through < ${today}::date))
+               OR EXISTS (SELECT 1 FROM food_effects f
+                          WHERE f.user_id = p.user_id AND f.deposits_paid < f.deposits_total
+                            AND f.started_at + make_interval(
+                                  secs => f.deposit_interval_seconds * (f.deposits_paid + 1))
+                                <= ${now.toISOString()}::timestamptz)
+               OR EXISTS (SELECT 1 FROM streak_days s
+                          WHERE s.user_id = p.user_id AND s.tehran_date < ${today}::date
+                            AND (p.streak_settled_through IS NULL
+                                 OR s.tehran_date > p.streak_settled_through)))
         ORDER BY p.user_id
         LIMIT ${limit}`,
   );

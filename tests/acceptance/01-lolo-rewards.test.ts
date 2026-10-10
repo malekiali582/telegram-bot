@@ -53,7 +53,7 @@ describe(`acceptance 1 — lolo rewards and global cooldown (${testBackend()})`,
         game.rng.fallback = fallback;
         const before = game.rng.calls.length;
         const result = await lolo(userId);
-        expect(result).toMatchObject({ status: 'ok', basePoints: expected, foodBonusPoints: 0n });
+        expect(result).toMatchObject({ status: 'ok', basePoints: expected });
         // the random draw is over exactly the closed range of the level
         expect(game.rng.calls.slice(before)).toEqual([[min, max]]);
         expect(await cashOf(game, userId)).toBe(BigInt(expected) * 100n);

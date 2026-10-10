@@ -201,7 +201,10 @@ describe(`acceptance 12 — «شنیدم» after a migration (${testBackend()})`
     // a cross-chat reply to the old message from another city does not count
     expect(await heard(otherGroup, chatId)).toEqual({ status: 'wrong_group' });
     // replying in the migrated supergroup to the pre-migration message works
-    expect(await heard(groupId, chatId)).toMatchObject({ status: 'ok', fearReward: 10 });
+    expect(await heard(groupId, chatId)).toMatchObject({
+      status: 'ok',
+      rewardPerMemberCenti: 5_000n,
+    });
     expect(await heard(groupId, chatId)).toEqual({ status: 'already_heard' });
   });
 });

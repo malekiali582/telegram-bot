@@ -12,7 +12,7 @@ import {
   settlements,
   users,
 } from '@lulu/database';
-import { and, count, eq, gte, isNull, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gte, isNull, sql } from 'drizzle-orm';
 import type { DomainContext } from './context.ts';
 import { DomainError } from './context.ts';
 import type { SystemWalletCode } from './ledger.ts';
@@ -91,20 +91,38 @@ export async function activePopulation(
   now: Date,
   windowDays: number,
 ): Promise<number> {
-  const since = new Date(now.getTime() - windowDays * 86_400_000);
   const [row] = await ex
     .select({ n: count() })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
-    .where(
-      and(
-        eq(memberships.groupId, groupId),
-        eq(memberships.status, 'member'),
-        gte(memberships.lastSuccessAt, since),
-        isNull(users.bannedAt),
-      ),
-    );
+    .where(activeMemberFilter(groupId, now, windowDays));
   return row?.n ?? 0;
+}
+
+/** The same players as activePopulation, by user id (ascending). */
+export async function activeMemberIds(
+  ex: Executor,
+  groupId: number,
+  now: Date,
+  windowDays: number,
+): Promise<number[]> {
+  const rows = await ex
+    .select({ userId: memberships.userId })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(activeMemberFilter(groupId, now, windowDays))
+    .orderBy(asc(memberships.userId));
+  return rows.map((r) => r.userId);
+}
+
+function activeMemberFilter(groupId: number, now: Date, windowDays: number) {
+  const since = new Date(now.getTime() - windowDays * 86_400_000);
+  return and(
+    eq(memberships.groupId, groupId),
+    eq(memberships.status, 'member'),
+    gte(memberships.lastSuccessAt, since),
+    isNull(users.bannedAt),
+  );
 }
 
 const bankCaps = (config: GameConfig, bankLevel: number) => {

@@ -187,7 +187,7 @@ describe(`acceptance 8 — switching batches (${testBackend()})`, () => {
         replyToMessageId: '77',
         replyFromThisBot: true,
       }),
-    ).toMatchObject({ status: 'ok', fearReward: 10 });
+    ).toMatchObject({ status: 'ok', rewardPerMemberCenti: 5_000n });
     // the retired batch and its stories are kept
     const [retired] = await game.ctx.db
       .select()

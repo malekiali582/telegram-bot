@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  foodEffects,
   ghostBatches,
   ghostStories,
   groupIdentities,
@@ -8,7 +9,6 @@ import {
   interestSettlements,
   jobState,
   ownedTools,
-  playerState,
   processedUpdates,
   transactions,
   userIdentities,
@@ -122,21 +122,24 @@ describe('money and item constraints', () => {
     ).toBe(PG_ERROR.foreignKeyViolation);
   });
 
-  it('only lets a player equip a tool they own', async () => {
-    expect(
-      await codeOf(
-        t.db.execute(
-          sql`UPDATE player_state SET equipped_tool = 'bow' WHERE user_id = ${player.userId}`,
-        ),
-      ),
-    ).toBe(PG_ERROR.foreignKeyViolation);
-    await expect(
-      t.db.execute(
-        sql`UPDATE player_state SET equipped_tool = 'knife' WHERE user_id = ${player.userId}`,
-      ),
-    ).resolves.toBeDefined();
-    const rows = await t.db.select().from(playerState);
-    expect(rows.find((r) => r.userId === player.userId)?.equippedTool).toBe('knife');
+  it('never records more paid food deposits than a meal has', async () => {
+    const meal = {
+      userId: player.userId,
+      food: 'bone',
+      nutrition: 1,
+      startedAt: new Date('2026-10-02T08:00:00Z'),
+      expiresAt: new Date('2026-10-02T08:30:00Z'),
+      depositCenti: 300n,
+      depositIntervalSeconds: 300,
+      depositsTotal: 6,
+    };
+    expect(await codeOf(t.db.insert(foodEffects).values({ ...meal, depositsPaid: 7 }))).toBe(
+      PG_ERROR.checkViolation,
+    );
+    expect(await codeOf(t.db.insert(foodEffects).values({ ...meal, depositCenti: 0n }))).toBe(
+      PG_ERROR.checkViolation,
+    );
+    await expect(t.db.insert(foodEffects).values(meal)).resolves.toBeDefined();
   });
 
   it('records interest for a (player, midnight) pair only once', async () => {

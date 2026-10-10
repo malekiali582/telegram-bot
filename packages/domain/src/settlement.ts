@@ -3,18 +3,19 @@ import type { Tx } from '@lulu/database';
 import {
   cemeteries,
   configVersions,
+  foodEffects,
   interestSettlements,
   playerState,
   queryRows,
 } from '@lulu/database';
-import { and, asc, eq, gt, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, lt, lte, sql } from 'drizzle-orm';
 import type { DomainContext } from './context.ts';
 import { postTransaction, systemWalletId, userWallets } from './ledger.ts';
 import { addDays, tehranDate, tehranMidnight } from './tehran.ts';
 
 /**
  * Lazy settlement, run under the player lock before every player action and by the
- * worker. Both parts depend only on stored state and effective times, never on when
+ * worker. Every part depends only on stored state and effective times, never on when
  * the code happens to run, so late, repeated or concurrent runs change nothing.
  */
 
@@ -206,4 +207,84 @@ export async function settleCemetery(
     })
     .where(eq(cemeteries.userId, userId));
   return { creditedCenti: credited };
+}
+
+// ───────────────────────── food deposits ─────────────────────────
+
+export interface MealSchedule {
+  startedAt: Date;
+  depositIntervalSeconds: number;
+  depositsTotal: number;
+}
+
+/**
+ * Deposits a meal has earned by `now`: one at the end of every whole interval since it
+ * was eaten (at +5, +10 … +30 minutes), at most `depositsTotal`. A deposit is due at
+ * exactly its instant.
+ */
+export function depositsDue(meal: MealSchedule, now: Date): number {
+  const elapsed = now.getTime() - meal.startedAt.getTime();
+  if (elapsed <= 0) return 0;
+  return Math.min(meal.depositsTotal, Math.floor(elapsed / (meal.depositIntervalSeconds * 1000)));
+}
+
+export interface FoodSettlementResult {
+  creditedCenti: bigint;
+  deposits: number;
+}
+
+/**
+ * Pays every food deposit that has come due into cash, in one ledger transaction.
+ * `deposits_paid` records progress per meal, so no deposit is paid twice and none is
+ * lost however late this runs. Fully paid meals have ended and are removed.
+ */
+export async function settleFood(tx: Tx, userId: number, now: Date): Promise<FoodSettlementResult> {
+  const meals = await tx
+    .select()
+    .from(foodEffects)
+    .where(
+      and(
+        eq(foodEffects.userId, userId),
+        lt(foodEffects.depositsPaid, foodEffects.depositsTotal),
+        lte(foodEffects.startedAt, now),
+      ),
+    )
+    .orderBy(asc(foodEffects.id));
+
+  let credited = 0n;
+  let deposits = 0;
+  const paid: { meal: number; food: string; deposits: number }[] = [];
+  for (const meal of meals) {
+    const due = depositsDue(meal, now);
+    const count = due - meal.depositsPaid;
+    if (count <= 0) continue;
+    credited += meal.depositCenti * BigInt(count);
+    deposits += count;
+    paid.push({ meal: meal.id, food: meal.food, deposits: count });
+    await tx.update(foodEffects).set({ depositsPaid: due }).where(eq(foodEffects.id, meal.id));
+  }
+
+  if (credited > 0n) {
+    const { cash } = await userWallets(tx, userId);
+    await postTransaction(tx, {
+      kind: 'food_income',
+      effectiveAt: now,
+      userId,
+      entries: [
+        { walletId: await systemWalletId(tx, 'mint:food'), amount: -credited },
+        { walletId: cash.id, amount: credited },
+      ],
+      metadata: { meals: paid },
+    });
+  }
+  await tx
+    .delete(foodEffects)
+    .where(
+      and(
+        eq(foodEffects.userId, userId),
+        sql`${foodEffects.depositsPaid} = ${foodEffects.depositsTotal}`,
+        lte(foodEffects.expiresAt, now),
+      ),
+    );
+  return { creditedCenti: credited, deposits };
 }

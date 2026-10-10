@@ -110,7 +110,7 @@ describe(`acceptance 5 — hunt cooldown (${testBackend()})`, () => {
     });
   });
 
-  it("rolls success with the equipped tool's chance, then the prey", async () => {
+  it("rolls success with the strongest owned tool's chance, then the prey", async () => {
     const userId = await hunter(3);
     game.rng.push(5_999, 2_399 + 4_000); // success; second roll lands in «mouse»
     expect(await tryHunt(userId)).toMatchObject({ status: 'success', food: 'mouse' });

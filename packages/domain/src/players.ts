@@ -11,7 +11,8 @@ import {
 import { and, eq, sql } from 'drizzle-orm';
 import type { DomainContext } from './context.ts';
 import { DomainError } from './context.ts';
-import { settleCemetery, settleInterest } from './settlement.ts';
+import { settleCemetery, settleFood, settleInterest } from './settlement.ts';
+import { settleStreaks } from './streaks.ts';
 
 export interface PlayerIdentityInput {
   platform: Platform;
@@ -110,7 +111,6 @@ export async function findUserIdByIdentity(
 export interface LockedPlayer {
   userId: number;
   level: number;
-  equippedTool: string | null;
   startedAt: Date;
   lastLoloAt: Date | null;
   banned: boolean;
@@ -119,7 +119,8 @@ export interface LockedPlayer {
 /**
  * First step of every player action: takes the player-wide lock (shared by all groups)
  * so concurrent actions for the same player run one after another, then settles what
- * is owed up to `now`: midnight interest (by effective time) and cemetery income.
+ * is owed up to `now`: midnight interest (by effective time), cemetery income, food
+ * deposits and the daily streak rewards of finished days.
  * Every read or change of a balance therefore sees settled values.
  */
 export async function beginPlayerAction(
@@ -136,19 +137,22 @@ export async function beginPlayerAction(
     .where(eq(users.id, userId));
   await settleInterest(tx, ctx, state, now);
   await settleCemetery(tx, ctx, userId, now);
+  await settleFood(tx, userId, now);
+  const banned = (user?.bannedAt ?? null) !== null;
+  await settleStreaks(tx, ctx, { ...state, banned }, now);
   return {
     userId,
     level: state.level,
-    equippedTool: state.equippedTool,
     startedAt: state.startedAt,
     lastLoloAt: state.lastLoloAt,
-    banned: (user?.bannedAt ?? null) !== null,
+    banned,
   };
 }
 
 /**
  * Any command a player sends in a group shows they are in it, so they count as a member
  * (e.g. for the group's «ترسناک‌ترین لولوها») even before a successful «لولو» there.
+ * Ghost rewards need more: a successful activity there (see activeGroupMembers).
  * Does not record a successful activity, and writes nothing if already a member.
  */
 export async function noteGroupPresence(

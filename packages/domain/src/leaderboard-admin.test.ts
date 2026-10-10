@@ -1,10 +1,11 @@
-import { auditLogs, ledgerEntries, playerState, transactions } from '@lulu/database';
+import { auditLogs, ledgerEntries, transactions } from '@lulu/database';
 import { testBackend } from '@lulu/database/testing';
 import { desc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adjustBalance, setPlayerBan } from './admin.ts';
 import { claimLolo } from './lolo.ts';
-import { playerFearRank, scaryLeaderboard } from './leaderboard.ts';
+import { playerRank, scaryLeaderboard } from './leaderboard.ts';
+import { noteGroupPresence } from './players.ts';
 import type { TestGame } from './testing.ts';
 import {
   cashOf,
@@ -30,7 +31,7 @@ afterAll(async () => {
 });
 
 describe(`«ترسناک‌ترین لولوها» (${testBackend()})`, () => {
-  it('ranks by fear, then level, then stable user id; excludes banned; scopes by group', async () => {
+  it('ranks by lolopoints (cash + treasury), then level, then user id; excludes banned; scopes by group', async () => {
     const isolated = await createTestGame();
     try {
       const g = isolated.ctx;
@@ -41,39 +42,45 @@ describe(`«ترسناک‌ترین لولوها» (${testBackend()})`, () => {
         await newPlayer(isolated, 'd'),
         await newPlayer(isolated, 'banned'),
       ];
-      const fear = (u: number, f: number) =>
-        g.db.update(playerState).set({ fear: f }).where(eq(playerState.userId, u));
-      await fear(a, 50);
-      await fear(b, 80);
-      await fear(c, 50);
-      await fear(d, 50);
-      await fear(banned, 999);
+      await grantPoints(isolated, a, 500);
+      // saving in the treasury never costs rank: b has 300 cash + 500 treasury
+      await grantPoints(isolated, b, 800);
+      await depositToTreasury(g, { userId: b, amountCenti: 50_000n });
+      await grantPoints(isolated, c, 500);
+      await grantPoints(isolated, d, 500);
+      await grantPoints(isolated, banned, 9_999);
       await setLevel(isolated, c, 3);
       const admin = await createAdminUser(isolated);
       await setPlayerBan(g, { userId: banned, banned: true, reason: 'تقلب', adminUserId: admin });
 
       const global = await scaryLeaderboard(g, { limit: 10 });
-      // b (80) · c (50, level 3) · a (50, lower id) · d (50)
-      expect(global.map((e) => [e.rank, e.displayName, e.fear])).toEqual([
-        [1, 'b', 80],
-        [2, 'c', 50],
-        [3, 'a', 50],
-        [4, 'd', 50],
+      // b (800) · c (500, level 3) · a (500, lower id) · d (500)
+      expect(global.map((e) => [e.rank, e.displayName, e.pointsCenti])).toEqual([
+        [1, 'b', 80_000n],
+        [2, 'c', 50_000n],
+        [3, 'a', 50_000n],
+        [4, 'd', 50_000n],
+      ]);
+      expect((await scaryLeaderboard(g, { limit: 3 })).map((e) => e.displayName)).toEqual([
+        'b',
+        'c',
+        'a',
       ]);
 
       const group = await newGroup(isolated);
-      await claimLolo(g, { userId: a, groupId: group });
-      await claimLolo(g, { userId: d, groupId: group });
+      await noteGroupPresence(g, { groupId: group, userId: a });
+      await noteGroupPresence(g, { groupId: group, userId: d });
       expect((await scaryLeaderboard(g, { groupId: group })).map((e) => e.displayName)).toEqual([
         'a',
         'd',
       ]);
-      expect(await playerFearRank(g, { userId: d, groupId: group })).toMatchObject({
+      expect(await playerRank(g, { userId: d, groupId: group })).toMatchObject({
         rank: 2,
-        fear: 50,
+        pointsCenti: 50_000n,
       });
-      expect(await playerFearRank(g, { userId: d })).toMatchObject({ rank: 4 }); // same fear globally
-      expect(await playerFearRank(g, { userId: banned })).toBeNull();
+      expect(await playerRank(g, { userId: d })).toMatchObject({ rank: 4 }); // same balance globally
+      expect(await playerRank(g, { userId: banned })).toBeNull();
+      expect(await playerRank(g, { userId: b, groupId: group })).toBeNull(); // not a member
     } finally {
       await isolated.close();
     }

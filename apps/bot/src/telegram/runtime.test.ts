@@ -2,7 +2,7 @@ import type { DomainContext } from '@lulu/domain';
 import type { LogLevel } from '@lulu/runtime';
 import { createLogger } from '@lulu/runtime';
 import { describe, expect, it } from 'vitest';
-import { makeUpdateHandler, pollingObserver } from './runtime.ts';
+import { logGroupPrivacy, makeUpdateHandler, pollingObserver } from './runtime.ts';
 
 interface Line {
   level: LogLevel;
@@ -127,5 +127,25 @@ describe('the path of an update is traced at debug level', () => {
     await handler(log)({ update_id: 11, message: { ...message } });
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ msg: 'update received', events: [] });
+  });
+});
+
+describe('group privacy is reported at startup', () => {
+  const tg = (readsAllGroupMessages: boolean) =>
+    ({ username: 'LuluBot', readsAllGroupMessages }) as Parameters<typeof logGroupPrivacy>[0];
+
+  it('warns, with the fix, when Telegram says Group Privacy is still on', () => {
+    const { log, lines } = capture();
+    logGroupPrivacy(tg(false), log);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ level: 'warn', bot: 'LuluBot' });
+    expect(lines[0]!.msg).toContain('group privacy is ON');
+    expect(String(lines[0]!.fix)).toContain('/setprivacy');
+  });
+
+  it('only notes it when plain group messages are delivered', () => {
+    const { log, lines } = capture();
+    logGroupPrivacy(tg(true), log);
+    expect(lines.map((l) => l.level)).toEqual(['info']);
   });
 });

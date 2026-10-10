@@ -1,6 +1,7 @@
 import { TOOL_KINDS } from '@lulu/config';
-import type { ToolKind } from '@lulu/config';
-import { inTransaction, ownedTools, playerState } from '@lulu/database';
+import type { GameConfig, ToolKind } from '@lulu/config';
+import type { Executor } from '@lulu/database';
+import { inTransaction, ownedTools } from '@lulu/database';
 import { and, eq } from 'drizzle-orm';
 import type { DomainContext } from './context.ts';
 import { findTransactionByKey, postTransaction, systemWalletId, userWallets } from './ledger.ts';
@@ -15,7 +16,33 @@ export interface ToolShopItem {
   equipped: boolean;
 }
 
-/** «ابزار شکار»: price, success chance, ownership and equipped state of every tool. */
+export async function ownedToolKinds(ex: Executor, userId: number): Promise<ToolKind[]> {
+  const rows = await ex
+    .select({ tool: ownedTools.toolKind })
+    .from(ownedTools)
+    .where(eq(ownedTools.userId, userId));
+  return TOOL_KINDS.filter((t) => rows.some((r) => r.tool === t));
+}
+
+/**
+ * The tool a player hunts with: always the strongest one owned (highest success chance,
+ * then the higher price, then the later tool in the list). Nothing is equipped by hand,
+ * so buying a better tool switches to it at once, and a config change re-ranks tools.
+ */
+export function strongestTool(config: GameConfig, owned: readonly ToolKind[]): ToolKind | null {
+  let best: ToolKind | null = null;
+  for (const tool of TOOL_KINDS) {
+    if (!owned.includes(tool)) continue;
+    const t = config.tools[tool];
+    const b = best === null ? null : config.tools[best];
+    if (!b || t.successBp > b.successBp || (t.successBp === b.successBp && t.price >= b.price)) {
+      best = tool;
+    }
+  }
+  return best;
+}
+
+/** «ابزار شکار»: price, success chance, ownership and the tool in use. */
 export async function toolShop(
   ctx: DomainContext,
   userId: number,
@@ -23,12 +50,9 @@ export async function toolShop(
   const now = ctx.clock.now();
   return inTransaction(ctx.db, async (tx) => {
     const { config } = await ctx.config.effectiveAt(tx, now);
-    const player = await beginPlayerAction(tx, ctx, userId, now);
-    const owned = await tx
-      .select({ tool: ownedTools.toolKind })
-      .from(ownedTools)
-      .where(eq(ownedTools.userId, userId));
-    const ownedSet = new Set(owned.map((o) => o.tool));
+    await beginPlayerAction(tx, ctx, userId, now);
+    const owned = await ownedToolKinds(tx, userId);
+    const inUse = strongestTool(config, owned);
     const { cash } = await userWallets(tx, userId);
     return {
       cashCenti: cash.balance,
@@ -36,15 +60,22 @@ export async function toolShop(
         tool,
         priceCenti: pointsToCenti(config.tools[tool].price),
         successBp: config.tools[tool].successBp,
-        owned: ownedSet.has(tool),
-        equipped: player.equippedTool === tool,
+        owned: owned.includes(tool),
+        equipped: inUse === tool,
       })),
     };
   });
 }
 
 export type BuyToolResult =
-  | { status: 'ok'; tool: ToolKind; priceCenti: bigint; cashCenti: bigint; equipped: boolean }
+  | {
+      status: 'ok';
+      tool: ToolKind;
+      priceCenti: bigint;
+      cashCenti: bigint;
+      /** The strongest owned tool after the purchase, which hunting now uses. */
+      inUse: ToolKind;
+    }
   | { status: 'already_owned'; tool: ToolKind }
   | { status: 'insufficient_funds'; priceCenti: bigint; cashCenti: bigint }
   | { status: 'duplicate'; transactionId: number }
@@ -52,8 +83,8 @@ export type BuyToolResult =
 
 /**
  * Buys a permanent tool from cash. No level requirement and no prerequisite tool.
- * Owning a tool twice is impossible (primary key on owned_tools). The first tool
- * bought is equipped automatically when nothing is equipped yet.
+ * Owning a tool twice is impossible (primary key on owned_tools). Hunting always uses
+ * the strongest owned tool, so a better tool is in use as soon as it is bought.
  */
 export async function buyTool(
   ctx: DomainContext,
@@ -97,44 +128,12 @@ export async function buyTool(
       .insert(ownedTools)
       .values({ userId: input.userId, toolKind: input.tool, acquiredAt: now, transactionId });
 
-    const equip = player.equippedTool === null;
-    if (equip) {
-      await tx
-        .update(playerState)
-        .set({ equippedTool: input.tool, updatedAt: now })
-        .where(eq(playerState.userId, input.userId));
-    }
     return {
       status: 'ok',
       tool: input.tool,
       priceCenti,
       cashCenti: cash.balance - priceCenti,
-      equipped: equip,
+      inUse: strongestTool(config, await ownedToolKinds(tx, input.userId)) ?? input.tool,
     };
-  });
-}
-
-export type EquipToolResult =
-  { status: 'ok'; tool: ToolKind } | { status: 'not_owned'; tool: ToolKind } | { status: 'banned' };
-
-/** Exactly one tool is equipped at a time; equipping replaces the previous one. */
-export async function equipTool(
-  ctx: DomainContext,
-  input: { userId: number; tool: ToolKind },
-): Promise<EquipToolResult> {
-  const now = ctx.clock.now();
-  return inTransaction(ctx.db, async (tx) => {
-    const player = await beginPlayerAction(tx, ctx, input.userId, now);
-    if (player.banned) return { status: 'banned' };
-    const [owned] = await tx
-      .select({ tool: ownedTools.toolKind })
-      .from(ownedTools)
-      .where(and(eq(ownedTools.userId, input.userId), eq(ownedTools.toolKind, input.tool)));
-    if (!owned) return { status: 'not_owned', tool: input.tool };
-    await tx
-      .update(playerState)
-      .set({ equippedTool: input.tool, updatedAt: now })
-      .where(eq(playerState.userId, input.userId));
-    return { status: 'ok', tool: input.tool };
   });
 }

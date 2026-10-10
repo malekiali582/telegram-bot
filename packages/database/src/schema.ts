@@ -186,11 +186,13 @@ export const ownedTools = pgTable(
 export const playerState = pgTable('player_state', {
   userId: ref('user_id').primaryKey(),
   level: integer('level').notNull().default(1),
-  fear: bigint('fear', { mode: 'number' }).notNull().default(0),
-  equippedTool: text('equipped_tool'),
   startedAt: instant('started_at').notNull().defaultNow(),
   lastLoloAt: instant('last_lolo_at'),
   interestSettledThrough: day('interest_settled_through'),
+  /** Tehran day of the first successful «لولو» (account age for the streak reward). */
+  firstLoloDate: day('first_lolo_date'),
+  /** Last Tehran day whose streak reward has been settled. */
+  streakSettledThrough: day('streak_settled_through'),
   createdAt: instant('created_at').notNull().defaultNow(),
   updatedAt: instant('updated_at').notNull().defaultNow(),
 });
@@ -210,10 +212,14 @@ export const foodEffects = pgTable('food_effects', {
   userId: ref('user_id').notNull(),
   food: text('food').notNull(),
   nutrition: integer('nutrition').notNull(),
-  pointsPerSecond: integer('points_per_second').notNull(),
   startedAt: instant('started_at').notNull(),
   expiresAt: instant('expires_at').notNull(),
   createdAt: instant('created_at').notNull().defaultNow(),
+  /** Paid into cash at started_at + k × interval, for k = 1 … depositsTotal. */
+  depositCenti: money('deposit_centi').notNull(),
+  depositIntervalSeconds: integer('deposit_interval_seconds').notNull(),
+  depositsTotal: integer('deposits_total').notNull(),
+  depositsPaid: integer('deposits_paid').notNull().default(0),
 });
 
 export type CooldownKind = 'lolo' | 'hunt' | 'ghost';
@@ -348,13 +354,14 @@ export const ghostEncounters = pgTable('ghost_encounters', {
   storyId: ref('story_id').notNull(),
   tehranDate: day('tehran_date').notNull(),
   textSnapshot: text('text_snapshot').notNull(),
-  fearReward: integer('fear_reward').notNull(),
   foundAt: instant('found_at').notNull(),
   expiresAt: instant('expires_at').notNull(),
   platform: text('platform').$type<Platform>().notNull(),
   messageChatId: text('message_chat_id').notNull(),
   messageId: text('message_id'),
   heardAt: instant('heard_at'),
+  /** Fixed when the ghost is found; paid to every active member on «شنیدم». */
+  rewardPerMemberCenti: money('reward_per_member_centi').notNull(),
 });
 
 export const dailyGhostState = pgTable(
@@ -364,6 +371,39 @@ export const dailyGhostState = pgTable(
     tehranDate: day('tehran_date').notNull(),
     foundCount: integer('found_count').notNull().default(0),
     consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+    attempts: integer('attempts').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.tehranDate] })],
+);
+
+// ───────────────────────── daily streak reward ─────────────────────────
+
+/** A Tehran day with at least one successful «لولو» by the player in the group. */
+export const streakDays = pgTable(
+  'streak_days',
+  {
+    userId: ref('user_id').notNull(),
+    groupId: ref('group_id').notNull(),
+    tehranDate: day('tehran_date').notNull(),
+    /** Consecutive days in this group ending on this day. */
+    streak: integer('streak').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.groupId, t.tehranDate] })],
+);
+
+/** The one streak payment of a player for a Tehran day. */
+export const streakRewards = pgTable(
+  'streak_rewards',
+  {
+    userId: ref('user_id').notNull(),
+    tehranDate: day('tehran_date').notNull(),
+    groupId: ref('group_id').notNull(),
+    streak: integer('streak').notNull(),
+    activeMembers: integer('active_members').notNull(),
+    personalCenti: money('personal_centi').notNull(),
+    groupCenti: money('group_centi').notNull(),
+    transactionId: ref('transaction_id'),
+    createdAt: instant('created_at').notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.tehranDate] })],
 );
@@ -405,7 +445,8 @@ export const pendingConfirmations = pgTable('pending_confirmations', {
   platform: text('platform').$type<Platform>().notNull(),
   chatId: text('chat_id').notNull(),
   createdAt: instant('created_at').notNull(),
-  expiresAt: instant('expires_at').notNull(),
+  /** `null` for a menu button: never expires and can be used again. */
+  expiresAt: instant('expires_at'),
   usedAt: instant('used_at'),
 });
 

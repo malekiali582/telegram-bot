@@ -1,4 +1,4 @@
-import { TOOL_KINDS } from '@lulu/config';
+import { CENTI_PER_POINT, TOOL_KINDS } from '@lulu/config';
 import type { CurseKind, FoodKind, ToolKind } from '@lulu/config';
 import type {
   CemeteryView,
@@ -43,9 +43,8 @@ const tehranClock = (at: Date) =>
     }).format(at),
   );
 const until = (at: Date, now: Date) => wait(at.getTime() - now.getTime());
-
-const GLOBAL_BOARD_IN_PRIVATE =
-  'رتبه‌بندی جهانی فقط در چت خصوصی با ربات نشان داده می‌شود؛ آنجا «ترسناک‌ترین لولوها» را بفرستید.';
+const fa = (n: number) => toPersianDigits(String(n));
+const minutes = (seconds: number) => fa(Math.round(seconds / 60));
 
 export const T = {
   // ── general ──
@@ -82,10 +81,12 @@ export const T = {
     addToGroup: '➕ افزودن به گروه',
   },
   button: {
-    notYours: 'این دکمه مال شما نیست.',
-    invalid: 'این دکمه معتبر نیست.',
-    used: 'این دکمه قبلاً استفاده شده است.',
-    expired: 'مهلت این دکمه تمام شده؛ دستور را دوباره بفرستید.',
+    notYours: 'این دکمه مال کس دیگری است. خودتان دستور را بفرستید تا دکمه‌های خودتان بیاید.',
+    invalid: 'این دکمه دیگر معتبر نیست؛ دستور را دوباره بفرستید.',
+    used: 'این تأیید قبلاً انجام یا لغو شده است.',
+    /** Only confirmations expire; menu buttons (help, my cave…) never do. */
+    expired: (ttlSeconds: number) =>
+      `مهلت این تأیید (${minutes(ttlSeconds)} دقیقه) تمام شده و کاری انجام نشد. برای امنیت تراکنش، دستور را دوباره بفرستید.`,
     done: 'انجام شد.',
   },
 
@@ -106,10 +107,8 @@ export const T = {
   ].join('\n'),
 
   // ── lolo ──
-  loloOk: (displayName: string, base: number, food: bigint, cash: bigint) =>
-    food > 0n
-      ? `🧛 ${name(displayName)} لولو کرد: +${formatInteger(base)} (پایه) +${formatInteger(food)} (غذا)\nموجودی نقد: ${pts(cash)}`
-      : `🧛 ${name(displayName)} لولو کرد: +${formatInteger(base)} پوینت\nموجودی نقد: ${pts(cash)}`,
+  loloOk: (displayName: string, base: number, cash: bigint) =>
+    `🧛 ${name(displayName)} لولو کرد: +${formatInteger(base)} پوینت\nموجودی نقد: ${pts(cash)}`,
   loloWait: (displayName: string, remainingMs: number) =>
     `⏳ ${name(displayName)}، لولوی بعدی ${wait(remainingMs)} دیگر.`,
 
@@ -125,7 +124,7 @@ export const T = {
       `🕳 غار ${name(p.displayName)}`,
       `سطح ${toPersianDigits(String(p.level))} — ${levelName(p.level)}`,
       `💰 نقد: ${pts(p.cashCenti)} · 🏦 گنجینه: ${pts(p.treasuryCenti)}`,
-      `جمع: ${pts(p.cashCenti + p.treasuryCenti)} · 😱 ترس: ${formatInteger(p.fear)}`,
+      `جمع: ${pts(p.cashCenti + p.treasuryCenti)}`,
       p.nextLevelCostCenti === null
         ? 'به بالاترین سطح رسیده‌اید.'
         : `هزینهٔ ارتقا به «${levelName(p.level + 1)}»: ${pts(p.nextLevelCostCenti)}`,
@@ -134,20 +133,23 @@ export const T = {
           ? 'هیچ'
           : TOOL_KINDS.filter((t) => p.tools.owned.includes(t))
               .map((t) =>
-                t === p.tools.equipped ? `<b>${TOOL_NAMES[t]}</b> (مجهز)` : TOOL_NAMES[t],
+                t === p.tools.equipped ? `<b>${TOOL_NAMES[t]}</b> (در حال استفاده)` : TOOL_NAMES[t],
               )
               .join('، ')
       }`,
       `🍖 سرداب: ${foodList(p.inventory) || 'خالی'}`,
       `🍽 وعده‌های فعال: ${toPersianDigits(String(p.meals.active.length))} از ${toPersianDigits(String(p.meals.capacity))}${
         p.meals.active.length
-          ? ` (${p.meals.active.map((m) => `${FOOD_NAMES[m.food]} تا ${tehranClock(m.expiresAt)}`).join('، ')})`
+          ? ` (${p.meals.active.map((m) => `${FOOD_NAMES[m.food]} تا ${tehranClock(m.expiresAt)}، ${fa(m.depositsLeft)} واریز ${pts(m.depositCenti)} مانده`).join('؛ ')})`
           : ''
       }`,
       p.cemetery
         ? `⚰️ قبرستان سطح ${toPersianDigits(String(p.cemetery.level))}: ${pts(p.cemetery.hourlyIncomeCenti)} در ساعت`
         : '⚰️ قبرستان: ندارید',
       `👻 روح امروز: ${toPersianDigits(String(p.ghostsToday.found))} از ${toPersianDigits(String(p.ghostsToday.limit))}`,
+      p.lastStreakReward
+        ? `🔥 آخرین پاداش روزانه: ${pts(p.lastStreakReward.personalCenti + p.lastStreakReward.groupCenti)} (استریک ${fa(p.lastStreakReward.streak)} روز، ${fa(p.lastStreakReward.activeMembers)} عضو فعال)`
+        : '🔥 پاداش روزانه: با «لولو» در گروه، هر نیمه‌شب پاداش استریک و پاداش گروهی می‌گیرید.',
     ];
     const waits = (
       [
@@ -176,21 +178,22 @@ export const T = {
   shop: (items: ToolShopItem[], cash: bigint) =>
     [
       '🔪 ابزار شکار (دائمی، بدون فروش و استهلاک)',
+      'شکار همیشه با قوی‌ترین ابزاری که دارید انجام می‌شود؛ تجهیز دستی لازم نیست.',
       ...items.map(
         (i) =>
           `${i.equipped ? '✅' : i.owned ? '☑️' : '▫️'} ${TOOL_NAMES[i.tool]} — ${pts(i.priceCenti)} — موفقیت ${formatPercentBp(i.successBp)}${
-            i.equipped ? ' (مجهز)' : i.owned ? ' (دارید)' : ''
+            i.equipped ? ' (در حال استفاده)' : i.owned ? ' (دارید)' : ''
           }`,
       ),
       `موجودی نقد: ${pts(cash)}`,
     ].join('\n'),
   toolPreview: (tool: ToolKind, price: bigint, cash: bigint) =>
     `خرید ${TOOL_NAMES[tool]} به قیمت ${pts(price)}؟\nموجودی نقد: ${pts(cash)}`,
-  toolOk: (tool: ToolKind, equipped: boolean) =>
-    `${TOOL_NAMES[tool]} خریداری شد${equipped ? ' و مجهز شد' : '. برای استفاده «تجهیز ' + TOOL_NAMES[tool] + '» را بزنید'}.`,
+  toolOk: (tool: ToolKind, inUse: ToolKind) =>
+    inUse === tool
+      ? `${TOOL_NAMES[tool]} خریداری شد و از این به بعد با آن شکار می‌کنید.`
+      : `${TOOL_NAMES[tool]} خریداری شد. شکار همچنان با ${TOOL_NAMES[inUse]} انجام می‌شود، چون قوی‌تر است.`,
   toolOwned: (tool: ToolKind) => `${TOOL_NAMES[tool]} را از قبل دارید.`,
-  toolNotOwned: (tool: ToolKind) => `${TOOL_NAMES[tool]} را ندارید؛ اول آن را بخرید.`,
-  equipped: (tool: ToolKind) => `${TOOL_NAMES[tool]} مجهز شد.`,
 
   // ── hunt ──
   hunt: (displayName: string, r: HuntResult, now: Date) => {
@@ -217,10 +220,17 @@ export const T = {
       `وعده‌های فعال: ${toPersianDigits(String(active))} از ${toPersianDigits(String(capacity))}`,
       'برای خوردن: «خوردن استخوان ۲» یا دکمه‌ها.',
     ].join('\n'),
-  eatPreview: (food: FoodKind, count: number) =>
-    `خوردن ${toPersianDigits(String(count))} «${FOOD_NAMES[food]}»؟ هر وعده ۳۰ دقیقه فعال است و با لولوی بعدی پاداش می‌دهد.`,
-  eatOk: (food: FoodKind, count: number, expiresAt: Date, active: number, capacity: number) =>
-    `😋 ${toPersianDigits(String(count))} «${FOOD_NAMES[food]}» خورده شد؛ تا ${tehranClock(expiresAt)} فعال است. وعده‌های فعال: ${toPersianDigits(String(active))} از ${toPersianDigits(String(capacity))}.`,
+  eatPreview: (food: FoodKind, count: number, m: MealPlan) =>
+    `خوردن ${fa(count)} «${FOOD_NAMES[food]}»؟ ${mealPlan(m)}`,
+  eatOk: (
+    food: FoodKind,
+    count: number,
+    expiresAt: Date,
+    active: number,
+    capacity: number,
+    m: MealPlan,
+  ) =>
+    `😋 ${fa(count)} «${FOOD_NAMES[food]}» خورده شد؛ تا ${tehranClock(expiresAt)} فعال است. ${mealPlan({ ...m, count })}\nوعده‌های فعال: ${fa(active)} از ${fa(capacity)}.`,
   eatCapacity: (active: number, capacity: number, requested: number) =>
     capacity === 0
       ? 'در این سطح هنوز نمی‌توانید غذا بخورید (ظرفیت صفر). با «ارتقای لولو» بالا بروید.'
@@ -346,13 +356,21 @@ export const T = {
     `🍖 ${toPersianDigits(String(count))} «${FOOD_NAMES[food]}» اهدا شد (+${formatInteger(points)}). ذخیرهٔ شکار: ${formatInteger(pool)}`,
 
   // ── ghosts ──
-  ghostFound: (displayName: string, text: string, fear: number, expiresAt: Date, now: Date) =>
+  ghostFound: (
+    displayName: string,
+    text: string,
+    reward: bigint,
+    expiresAt: Date,
+    now: Date,
+    attemptsLeft: number,
+  ) =>
     [
       `👻 ${name(displayName)} روحی از یاد رفته پیدا کرد…`,
       '',
       `<i>${escapeHtml(text)}</i>`,
       '',
-      `برای گرفتن ${formatInteger(fear)} امتیاز ترس، روی همین پیام reply کنید و بنویسید «شنیدم» (تا ${until(expiresAt, now)} دیگر).`,
+      `${name(displayName)}، روی همین پیام reply کنید و بنویسید «شنیدم» تا به هر عضو فعال این گروه (از جمله خودتان) ${pts(reward)} برسد. مهلت: ${until(expiresAt, now)} دیگر. بدون «شنیدم» به هیچ‌کس پاداشی نمی‌رسد.`,
+      `تلاش‌های باقی‌ماندهٔ امروز: ${fa(attemptsLeft)}`,
     ].join('\n'),
   ghostSearch: (
     displayName: string,
@@ -362,10 +380,14 @@ export const T = {
     switch (r.status) {
       case 'not_found': {
         const pct = Number((r.nextChance.numerator * 10_000n) / r.nextChance.denominator);
-        return `🌫 ${name(displayName)} روحی پیدا نکرد. شانس تلاش بعدی: ${formatPercentBp(pct)} — ${until(r.nextAvailableAt, now)} دیگر.`;
+        return r.attemptsLeft > 0
+          ? `🌫 ${name(displayName)} روحی پیدا نکرد. شانس تلاش بعدی: ${formatPercentBp(pct)} — ${until(r.nextAvailableAt, now)} دیگر. تلاش‌های باقی‌ماندهٔ امروز: ${fa(r.attemptsLeft)}`
+          : `🌫 ${name(displayName)} روحی پیدا نکرد. تلاش‌های امروز تمام شد؛ از نیمه‌شب (تهران) دوباره.`;
       }
       case 'daily_limit':
-        return `امروز ${toPersianDigits(String(r.dailyLimit))} روح پیدا کرده‌اید؛ سهمیهٔ بعدی از نیمه‌شب (تهران).`;
+        return `امروز ${fa(r.dailyLimit)} روح پیدا کرده‌اید؛ سهمیهٔ بعدی از نیمه‌شب (تهران).`;
+      case 'no_attempts':
+        return `امروز هر ${fa(r.dailyAttempts)} تلاش جست‌وجوی روح را انجام داده‌اید؛ تلاش‌های بعدی از نیمه‌شب (تهران).`;
       case 'no_content':
         return 'امشب روحی سرگردان نیست. بعداً دوباره سر بزنید.';
       case 'cooldown':
@@ -374,43 +396,43 @@ export const T = {
         return T.banned;
     }
   },
-  ghostRepost: (ownerName: string, text: string, fear: number, expiresAt: Date, now: Date) =>
+  ghostRepost: (ownerName: string, text: string, reward: bigint, expiresAt: Date, now: Date) =>
     [
       `👻 روح شنیده‌نشدهٔ ${name(ownerName)} (پیش از ارتقای گروه به سوپرگروه پیدا شده بود)…`,
       '',
       `<i>${escapeHtml(text)}</i>`,
       '',
-      `صاحبش می‌تواند روی همین پیام reply کند و «شنیدم» بنویسد: ${formatInteger(fear)} امتیاز ترس (تا ${until(expiresAt, now)} دیگر).`,
+      `پیداکننده می‌تواند روی همین پیام reply کند و «شنیدم» بنویسد تا به هر عضو فعال این گروه ${pts(reward)} برسد (تا ${until(expiresAt, now)} دیگر).`,
     ].join('\n'),
-  heardOk: (displayName: string, fear: number, total: number) =>
-    `😱 ${name(displayName)} شنید! +${formatInteger(fear)} ترس (مجموع: ${formatInteger(total)})`,
+  heardOk: (displayName: string, reward: bigint, members: number) =>
+    `😱 ${name(displayName)} صدای روح را شنید! به ${fa(members)} عضو فعال این گروه هر کدام ${pts(reward)} رسید.`,
   heardNoReply: 'برای «شنیدم»، روی پیام روحی که خودتان پیدا کرده‌اید reply کنید.',
+  heardNotOwner:
+    'این روح را کس دیگری پیدا کرده؛ فقط خودش می‌تواند «شنیدم» بزند تا به همه پاداش برسد.',
   heardNotGhost: 'این پیام، پیام روح نیست. روی خود پیام روح (نه نسخهٔ فورواردشده) reply کنید.',
   heardWrongGroup: 'این روح مال گروه دیگری است.',
-  heardNotOwner: 'این روح را کس دیگری پیدا کرده است.',
   heardAlready: 'این روح را قبلاً شنیده‌اید.',
   heardExpired: 'مهلت شنیدن این روح تمام شده است.',
 
   // ── leaderboard ──
-  globalBoardInPrivate: GLOBAL_BOARD_IN_PRIVATE,
-  /** In a group only that group's members; the global list is for private chat. */
+  /**
+   * In a group: that group's members, plus the bot-wide top three. In private chat:
+   * the bot-wide list. `me` is shown when the player is outside the listed top.
+   */
   leaderboard: (
     scope: 'group' | 'global',
     entries: LeaderboardEntry[],
     me: LeaderboardEntry | null,
+    globalTop: LeaderboardEntry[] = [],
   ) =>
     [
-      `😱 ترسناک‌ترین لولوها — ${scope === 'group' ? 'این گروه' : 'جهانی'}`,
-      ...(entries.length
-        ? entries.map(
-            (e) =>
-              `${toPersianDigits(String(e.rank))}. ${name(e.displayName)} — ترس ${formatInteger(e.fear)} · ${levelName(e.level)}`,
-          )
-        : ['هنوز کسی ترسی جمع نکرده است.']),
+      `😱 ترسناک‌ترین لولوها — ${scope === 'group' ? 'این گروه' : 'کل ربات'}`,
+      ...(entries.length ? entries.map(rankLine) : ['هنوز کسی اینجا لولوپوینتی ندارد.']),
       me && !entries.some((e) => e.userId === me.userId)
-        ? `…\n${toPersianDigits(String(me.rank))}. شما — ترس ${formatInteger(me.fear)}`
+        ? `…\n${fa(me.rank)}. شما — ${pts(me.pointsCenti)}`
         : '',
-      scope === 'group' ? `\n<i>${GLOBAL_BOARD_IN_PRIVATE}</i>` : '',
+      globalTop.length ? `\n🌍 سه لولوی برتر کل ربات:\n${globalTop.map(rankLine).join('\n')}` : '',
+      '<i>رتبه بر اساس لولوپوینت (نقد + گنجینه) است.</i>',
     ]
       .filter(Boolean)
       .join('\n'),
@@ -421,4 +443,25 @@ function foodList(inv: Record<FoodKind, number>): string {
     .filter((f) => inv[f] > 0)
     .map((f) => `${FOOD_NAMES[f]} ×${formatInteger(inv[f])}`)
     .join('، ');
+}
+
+const rankLine = (e: LeaderboardEntry) =>
+  `${fa(e.rank)}. ${name(e.displayName)} — ${pts(e.pointsCenti)} · ${levelName(e.level)}`;
+
+/** What one kind of meal pays, for previews and confirmations. */
+export interface MealPlan {
+  pointsPerDeposit: number;
+  depositsTotal: number;
+  depositIntervalSeconds: number;
+  count?: number;
+}
+
+function mealPlan(m: MealPlan): string {
+  const each = BigInt(m.pointsPerDeposit) * CENTI_PER_POINT;
+  const perMeal = each * BigInt(m.depositsTotal);
+  const minutesTotal = minutes(m.depositIntervalSeconds * m.depositsTotal);
+  const base = `هر وعده ${minutesTotal} دقیقه فعال است و هر ${minutes(m.depositIntervalSeconds)} دقیقه ${pts(each)} خودکار به نقد واریز می‌کند (جمع هر وعده: ${pts(perMeal)}).`;
+  return m.count && m.count > 1
+    ? `${base} جمع این ${fa(m.count)} وعده: ${pts(perMeal * BigInt(m.count))}.`
+    : base;
 }

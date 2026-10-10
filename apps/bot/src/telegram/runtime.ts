@@ -24,6 +24,12 @@ export interface TelegramBot {
   botId: number;
   username: string;
   adapter: TelegramAdapter;
+  /**
+   * `getMe.can_read_all_group_messages`: false while BotFather's Group Privacy is on.
+   * Then, in groups where the bot is not an admin, Telegram delivers only «/» commands,
+   * replies to the bot's messages and mentions, so a plain «لولو» never arrives.
+   */
+  readsAllGroupMessages: boolean;
 }
 
 /**
@@ -44,7 +50,26 @@ export async function connectTelegram(token: string): Promise<TelegramBot> {
     botId: bot.botInfo.id,
     username: bot.botInfo.username,
     adapter: new TelegramAdapter(bot.api, bot.botInfo.username),
+    readsAllGroupMessages: bot.botInfo.can_read_all_group_messages,
   };
+}
+
+/**
+ * Says at startup whether Telegram will deliver plain group messages. Group Privacy is
+ * a Telegram-side setting; the bot cannot change it, only report what getMe says.
+ */
+export function logGroupPrivacy(tg: TelegramBot, log: Logger): void {
+  if (tg.readsAllGroupMessages) {
+    log.info('group privacy is off: plain group messages are delivered', { bot: tg.username });
+    return;
+  }
+  log.warn(
+    'group privacy is ON for this bot: in groups where it is not an admin, Telegram delivers only /commands and replies to its messages, so a plain «لولو» is never received',
+    {
+      bot: tg.username,
+      fix: 'BotFather → /setprivacy → this bot → Disable, then remove the bot from each group and add it again (or make it an admin)',
+    },
+  );
 }
 
 /**
@@ -150,6 +175,7 @@ export async function startPolling(
   log: Logger,
   options: { onFatal?: (error: unknown, code: number | undefined) => void } = {},
 ): Promise<{ stop(): Promise<void> }> {
+  logGroupPrivacy(tg, log);
   const info = await tg.bot.api.getWebhookInfo();
   if (info.url)
     log.warn('removing the webhook set on this bot', { pending: info.pending_update_count });
@@ -199,6 +225,7 @@ export async function startWebhook(
     log: Logger;
   },
 ): Promise<Server> {
+  logGroupPrivacy(tg, options.log);
   const server = createWebhookServer({
     path: WEBHOOK_PATH,
     secret: options.secret,

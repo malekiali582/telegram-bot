@@ -158,6 +158,10 @@ process.stdout.write(
     `✅ ربات @${tg.username} روشن است (حالت توسعه، long polling).`,
     `   دیتابیس: PostgreSQL محلی در ${join(process.cwd(), DEV_DIR)} — پورت ${dev.DEV_DB_PORT}`,
     `   در تلگرام به همین ربات (@${tg.username}) /start بدهید یا آن را به یک گروه تستی اضافه کنید.`,
+    tg.readsAllGroupMessages
+      ? '   Group Privacy خاموش است: پیام سادهٔ «لولو» در گروه‌ها می‌رسد.'
+      : '   ⚠️ تلگرام می‌گوید Group Privacy این ربات هنوز روشن است: در گروه‌هایی که ربات ادمین نیست فقط «/» و reply به ربات می‌رسد.\n' +
+        '      BotFather ← /setprivacy ← همین ربات ← Disable؛ بعد ربات را از گروه حذف و دوباره اضافه کنید.',
     level === 'debug' || level === 'trace'
       ? '   لاگ debug روشن است: مسیر هر پیام از دریافت تا ارسال در ترمینال می‌آید.'
       : '   برای دیدن مسیر هر پیام از دریافت تا ارسال، در .env بگذارید: LOG_LEVEL=debug',

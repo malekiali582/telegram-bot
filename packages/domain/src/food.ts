@@ -1,68 +1,11 @@
 import type { FoodKind } from '@lulu/config';
 import { foodEffects, inTransaction, inventory } from '@lulu/database';
 import type { Tx } from '@lulu/database';
-import { and, count, eq, gt, lt, sql } from 'drizzle-orm';
+import { and, count, eq, gt, sql } from 'drizzle-orm';
 import type { DomainContext } from './context.ts';
 import { findTransactionByKey, postTransaction } from './ledger.ts';
+import { pointsToCenti } from './money.ts';
 import { beginPlayerAction } from './players.ts';
-
-export interface ActiveMeal {
-  pointsPerSecond: number;
-  startedAt: Date;
-  expiresAt: Date;
-}
-
-/**
- * Start of the food window for the next successful lolo:
- * max(last successful lolo — or account start —, now − claim window).
- */
-export function foodWindowStart(
-  lastLoloAt: Date | null,
-  startedAt: Date,
-  now: Date,
-  claimWindowSeconds: number,
-): Date {
-  const since = (lastLoloAt ?? startedAt).getTime();
-  return new Date(Math.max(since, now.getTime() - claimWindowSeconds * 1000));
-}
-
-/**
- * Food bonus in whole points for the window [windowStart, now):
- * floor( Σ pointsPerSecond × |[windowStart, now) ∩ [startedAt, expiresAt)| ).
- * Exact integer arithmetic at millisecond resolution; only the final sum is rounded
- * down. Half-open intervals mean no instant is counted twice.
- */
-export function foodBonusPoints(
-  meals: readonly ActiveMeal[],
-  windowStart: Date,
-  now: Date,
-): bigint {
-  let pointMilliseconds = 0n;
-  for (const meal of meals) {
-    const from = Math.max(windowStart.getTime(), meal.startedAt.getTime());
-    const to = Math.min(now.getTime(), meal.expiresAt.getTime());
-    if (to > from) pointMilliseconds += BigInt(meal.pointsPerSecond) * BigInt(to - from);
-  }
-  return pointMilliseconds / 1000n;
-}
-
-/** Meals that can overlap [windowStart, now). */
-export async function mealsOverlapping(tx: Tx, userId: number, windowStart: Date, now: Date) {
-  return tx
-    .select({
-      pointsPerSecond: foodEffects.pointsPerSecond,
-      startedAt: foodEffects.startedAt,
-      expiresAt: foodEffects.expiresAt,
-    })
-    .from(foodEffects)
-    .where(
-      and(
-        eq(foodEffects.userId, userId),
-        gt(foodEffects.expiresAt, windowStart),
-        lt(foodEffects.startedAt, now),
-      ),
-    );
-}
 
 export async function activeMealCount(tx: Tx, userId: number, now: Date): Promise<number> {
   const [row] = await tx
@@ -81,6 +24,10 @@ export type EatResult =
       expiresAt: Date;
       activeMeals: number;
       capacity: number;
+      /** Points per deposit for one meal; every meal of this request pays the same. */
+      pointsPerDeposit: number;
+      depositsTotal: number;
+      depositIntervalSeconds: number;
     }
   | { status: 'not_enough_food'; food: FoodKind; have: number; requested: number }
   | { status: 'capacity_exceeded'; active: number; capacity: number; requested: number }
@@ -90,8 +37,10 @@ export type EatResult =
 
 /**
  * Eats `count` items: each becomes an independent meal active for the configured
- * duration. A request that would exceed the level's simultaneous-meal capacity is
- * rejected entirely; no running meal is ever replaced.
+ * duration, paying the food's fixed amount into cash at the end of every deposit
+ * interval (see settleFood). The amount and schedule are fixed now, so a later config
+ * change never alters a running meal. A request that would exceed the level's
+ * simultaneous-meal capacity is rejected entirely; no running meal is ever replaced.
  */
 export async function eat(
   ctx: DomainContext,
@@ -128,18 +77,21 @@ export async function eat(
       .set({ quantity: sql`${inventory.quantity} - ${input.count}` })
       .where(and(eq(inventory.userId, input.userId), eq(inventory.food, input.food)));
 
-    const nutrition = config.foods[input.food].nutrition;
-    const pointsPerSecond = config.food.pointsPerNutritionPerSecond * nutrition;
-    const expiresAt = new Date(now.getTime() + config.food.mealDurationSeconds * 1000);
+    const { nutrition, pointsPerDeposit } = config.foods[input.food];
+    const { mealDurationSeconds, depositIntervalSeconds } = config.food;
+    const depositsTotal = mealDurationSeconds / depositIntervalSeconds;
+    const expiresAt = new Date(now.getTime() + mealDurationSeconds * 1000);
     await tx.insert(foodEffects).values(
       Array.from({ length: input.count }, () => ({
         userId: input.userId,
         food: input.food,
         nutrition,
-        pointsPerSecond,
         startedAt: now,
         expiresAt,
         createdAt: now,
+        depositCenti: pointsToCenti(pointsPerDeposit),
+        depositIntervalSeconds,
+        depositsTotal,
       })),
     );
     await postTransaction(tx, {
@@ -148,7 +100,7 @@ export async function eat(
       userId: input.userId,
       configVersionId: versionId,
       entries: [],
-      metadata: { food: input.food, count: input.count, pointsPerSecond },
+      metadata: { food: input.food, count: input.count, pointsPerDeposit, depositsTotal },
       ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
     });
 
@@ -160,6 +112,9 @@ export async function eat(
       expiresAt,
       activeMeals: active + input.count,
       capacity,
+      pointsPerDeposit,
+      depositsTotal,
+      depositIntervalSeconds,
     };
   });
 }

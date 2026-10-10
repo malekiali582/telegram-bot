@@ -7,8 +7,6 @@ import {
   foodEffects,
   inTransaction,
   inventory,
-  ownedTools,
-  playerState,
   users,
 } from '@lulu/database';
 import type { CooldownKind } from '@lulu/database';
@@ -19,6 +17,9 @@ import { pointsToCenti } from './money.ts';
 import { beginPlayerAction } from './players.ts';
 import { CEMETERY_DENOMINATOR, cemeteryRateNumerator } from './settlement.ts';
 import { tehranDate } from './tehran.ts';
+import type { StreakRewardView } from './streaks.ts';
+import { lastStreakReward } from './streaks.ts';
+import { ownedToolKinds, strongestTool } from './tools.ts';
 
 export interface PlayerProfile {
   userId: number;
@@ -30,14 +31,19 @@ export interface PlayerProfile {
   nextLevelCostCenti: bigint | null;
   cashCenti: bigint;
   treasuryCenti: bigint;
-  fear: number;
+  /** `equipped` is the tool in use: always the strongest owned one. */
   tools: { owned: ToolKind[]; equipped: ToolKind | null };
   inventory: Record<FoodKind, number>;
-  meals: { active: { food: FoodKind; expiresAt: Date }[]; capacity: number };
+  meals: {
+    active: { food: FoodKind; expiresAt: Date; depositCenti: bigint; depositsLeft: number }[];
+    capacity: number;
+  };
   cemetery: { level: number; hourlyIncomeCenti: bigint } | null;
   /** Only cooldowns still running. */
   waits: Partial<Record<CooldownKind, Date>>;
   ghostsToday: { found: number; limit: number };
+  /** The latest daily streak payment, if any. */
+  lastStreakReward: StreakRewardView | null;
 }
 
 /**
@@ -57,13 +63,16 @@ export async function playerProfile(ctx: DomainContext, userId: number): Promise
       .where(
         and(eq(dailyGhostState.userId, userId), eq(dailyGhostState.tehranDate, tehranDate(now))),
       );
-    const owned = await tx
-      .select({ tool: ownedTools.toolKind })
-      .from(ownedTools)
-      .where(eq(ownedTools.userId, userId));
+    const owned = await ownedToolKinds(tx, userId);
     const stock = await tx.select().from(inventory).where(eq(inventory.userId, userId));
     const meals = await tx
-      .select({ food: foodEffects.food, expiresAt: foodEffects.expiresAt })
+      .select({
+        food: foodEffects.food,
+        expiresAt: foodEffects.expiresAt,
+        depositCenti: foodEffects.depositCenti,
+        depositsTotal: foodEffects.depositsTotal,
+        depositsPaid: foodEffects.depositsPaid,
+      })
       .from(foodEffects)
       .where(and(eq(foodEffects.userId, userId), gt(foodEffects.expiresAt, now)))
       .orderBy(asc(foodEffects.expiresAt));
@@ -72,10 +81,6 @@ export async function playerProfile(ctx: DomainContext, userId: number): Promise
       .select({ kind: cooldowns.kind, availableAt: cooldowns.availableAt })
       .from(cooldowns)
       .where(and(eq(cooldowns.userId, userId), gt(cooldowns.availableAt, now)));
-    const [state] = await tx
-      .select({ fear: playerState.fear })
-      .from(playerState)
-      .where(eq(playerState.userId, userId));
 
     const levelConfig = config.levels[player.level - 1];
     const cost = levelConfig?.upgradeCost ?? null;
@@ -89,16 +94,17 @@ export async function playerProfile(ctx: DomainContext, userId: number): Promise
       nextLevelCostCenti: cost === null ? null : pointsToCenti(cost),
       cashCenti: cash.balance,
       treasuryCenti: treasury.balance,
-      fear: state?.fear ?? 0,
-      tools: {
-        owned: owned.map((o) => o.tool as ToolKind),
-        equipped: (player.equippedTool as ToolKind | null) ?? null,
-      },
+      tools: { owned, equipped: strongestTool(config, owned) },
       inventory: Object.fromEntries(
         FOOD_KINDS.map((f) => [f, stock.find((s) => s.food === f)?.quantity ?? 0]),
       ) as Record<FoodKind, number>,
       meals: {
-        active: meals.map((m) => ({ food: m.food as FoodKind, expiresAt: m.expiresAt })),
+        active: meals.map((m) => ({
+          food: m.food as FoodKind,
+          expiresAt: m.expiresAt,
+          depositCenti: m.depositCenti,
+          depositsLeft: m.depositsTotal - m.depositsPaid,
+        })),
         capacity: levelConfig?.mealCapacity ?? 0,
       },
       cemetery: cemetery
@@ -112,6 +118,7 @@ export async function playerProfile(ctx: DomainContext, userId: number): Promise
         : null,
       waits: Object.fromEntries(waits.map((w) => [w.kind, w.availableAt])),
       ghostsToday: { found: today?.found ?? 0, limit: config.ghosts.dailyLimit },
+      lastStreakReward: await lastStreakReward(tx, userId),
     };
   });
 }

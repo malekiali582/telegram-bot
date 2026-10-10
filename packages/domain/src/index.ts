@@ -12,6 +12,7 @@ export * from './tools.ts';
 export * from './hunt.ts';
 export * from './tehran.ts';
 export * from './settlement.ts';
+export * from './streaks.ts';
 export * from './settlement-job.ts';
 export * from './cemetery.ts';
 export * from './treasury.ts';

@@ -9,13 +9,12 @@ import {
   donateBlood,
   donateHunt,
   eat,
-  equipTool,
   findUserIdByIdentity,
   hearGhost,
   hunt,
   openCemetery,
-  playerFearRank,
   playerProfile,
+  playerRank,
   previewLevelUpgrade,
   scaryLeaderboard,
   searchGhost,
@@ -118,7 +117,15 @@ async function preview(
       if (active + count > profile.meals.capacity) {
         return { text: T.eatCapacity(active, profile.meals.capacity, count) };
       }
-      return ok(T.eatPreview(food, count));
+      const { config } = await h.ctx.config.effectiveAt(h.ctx.db, now(h));
+      return ok(
+        T.eatPreview(food, count, {
+          pointsPerDeposit: config.foods[food].pointsPerDeposit,
+          depositIntervalSeconds: config.food.depositIntervalSeconds,
+          depositsTotal: config.food.mealDurationSeconds / config.food.depositIntervalSeconds,
+          count,
+        }),
+      );
     }
     case 'cemetery_open': {
       const v = await cemeteryView(h.ctx, h.userId);
@@ -246,7 +253,7 @@ async function runOp(
     case 'tool_buy': {
       const tool = p.tool as ToolKind;
       const r = await buyTool(h.ctx, { userId, tool, idempotencyKey: key });
-      if (r.status === 'ok') return T.toolOk(tool, r.equipped);
+      if (r.status === 'ok') return T.toolOk(tool, r.inUse);
       if (r.status === 'already_owned') return T.toolOwned(tool);
       if (r.status === 'insufficient_funds') return T.insufficient(r.cashCenti);
       return r.status === 'banned' ? T.banned : T.stale;
@@ -259,7 +266,7 @@ async function runOp(
         idempotencyKey: key,
       });
       if (r.status === 'ok')
-        return T.eatOk(r.food, r.count, r.expiresAt, r.activeMeals, r.capacity);
+        return T.eatOk(r.food, r.count, r.expiresAt, r.activeMeals, r.capacity, r);
       if (r.status === 'capacity_exceeded') return T.eatCapacity(r.active, r.capacity, r.requested);
       if (r.status === 'not_enough_food') return T.notEnoughFood(r.food, r.have);
       return r.status === 'banned' ? T.banned : T.stale;
@@ -412,7 +419,6 @@ const EXAMPLES: Record<string, string> = {
   donate_blood: 'اهدای خون ۵۰۰',
   donate_hunt: 'اهدای شکار موش ۲',
   tool_buy: 'خرید چاقو',
-  tool_equip: 'تجهیز چاقو',
   eat: 'خوردن استخوان ۱',
   curse_upgrade: 'ارتقای نفرین شتاب شکار',
 };
@@ -450,6 +456,7 @@ export async function handleCommand(h: HandlerContext, cmd: ParsedCommand): Prom
 
   switch (cmd.command) {
     case 'start': {
+      // Menu buttons: they never expire and can be pressed again (see buttons.ts).
       const rows = await buttons(h, [
         [
           { label: T.btn.help, action: 'help' },
@@ -467,8 +474,7 @@ export async function handleCommand(h: HandlerContext, cmd: ParsedCommand): Prom
 
     case 'lolo': {
       const r = await claimLolo(h.ctx, { userId: h.userId, groupId });
-      if (r.status === 'ok')
-        return [send(h.conv, T.loloOk(who, r.basePoints, r.foodBonusPoints, r.cashCenti))];
+      if (r.status === 'ok') return [send(h.conv, T.loloOk(who, r.basePoints, r.cashCenti))];
       if (r.status === 'cooldown')
         return r.notify ? [send(h.conv, T.loloWait(who, r.remainingMs))] : [];
       return [send(h.conv, T.banned)];
@@ -485,15 +491,13 @@ export async function handleCommand(h: HandlerContext, cmd: ParsedCommand): Prom
     case 'tool_shop': {
       const shop = await toolShop(h.ctx, h.userId);
       const rows: ButtonSpec[][] = shop.items
-        .filter((i) => !i.equipped)
+        .filter((i) => !i.owned)
         .map((i) => [
-          i.owned
-            ? { label: `تجهیز ${TOOL_NAMES[i.tool]}`, action: 'equip', params: { tool: i.tool } }
-            : {
-                label: `خرید ${TOOL_NAMES[i.tool]}`,
-                action: 'prompt',
-                params: { op: 'tool_buy', tool: i.tool },
-              },
+          {
+            label: `خرید ${TOOL_NAMES[i.tool]}`,
+            action: 'prompt',
+            params: { op: 'tool_buy', tool: i.tool },
+          },
         ]);
       return [
         send(h.conv, T.shop(shop.items, shop.cashCenti), { buttons: await buttons(h, rows) }),
@@ -501,11 +505,6 @@ export async function handleCommand(h: HandlerContext, cmd: ParsedCommand): Prom
     }
     case 'tool_buy':
       return sendPreview(h, 'tool_buy', { tool: cmd.args.tool });
-    case 'tool_equip': {
-      const r = await equipTool(h.ctx, { userId: h.userId, tool: cmd.args.tool });
-      if (r.status === 'ok') return [send(h.conv, T.equipped(r.tool))];
-      return [send(h.conv, r.status === 'not_owned' ? T.toolNotOwned(r.tool) : T.banned)];
-    }
 
     case 'hunt':
       return [send(h.conv, T.hunt(who, await hunt(h.ctx, { userId: h.userId, groupId }), t))];
@@ -612,9 +611,13 @@ export async function handleCommand(h: HandlerContext, cmd: ParsedCommand): Prom
       });
       if (r.status === 'found') {
         return [
-          send(h.conv, T.ghostFound(who, r.text, r.fearReward, r.expiresAt, t), {
-            onSent: { type: 'ghost_encounter', encounterId: r.encounterId },
-          }),
+          send(
+            h.conv,
+            T.ghostFound(who, r.text, r.rewardPerMemberCenti, r.expiresAt, t, r.attemptsLeft),
+            {
+              onSent: { type: 'ghost_encounter', encounterId: r.encounterId },
+            },
+          ),
         ];
       }
       if (r.status === 'cooldown' && !r.notify) return [];
@@ -630,7 +633,7 @@ export async function handleCommand(h: HandlerContext, cmd: ParsedCommand): Prom
         replyFromThisBot: h.replyTo?.fromThisBot ?? false,
       });
       const text = {
-        ok: r.status === 'ok' ? T.heardOk(who, r.fearReward, r.totalFear) : '',
+        ok: r.status === 'ok' ? T.heardOk(who, r.rewardPerMemberCenti, r.members) : '',
         no_reply: T.heardNoReply,
         not_a_ghost: T.heardNotGhost,
         wrong_group: T.heardWrongGroup,
@@ -642,11 +645,16 @@ export async function handleCommand(h: HandlerContext, cmd: ParsedCommand): Prom
       return [send(h.conv, text)];
     }
     case 'leaderboard': {
-      // In a group only its own members are ranked; the global list is private-chat only.
-      const scope = h.groupId === null ? {} : { groupId: h.groupId };
-      const entries = await scaryLeaderboard(h.ctx, { ...scope, limit: 10 });
-      const me = await playerFearRank(h.ctx, { userId: h.userId, ...scope });
-      return [send(h.conv, T.leaderboard(h.groupId === null ? 'global' : 'group', entries, me))];
+      // In a group: its own members, plus the bot-wide top three. In private: bot-wide.
+      if (h.groupId === null) {
+        const entries = await scaryLeaderboard(h.ctx, { limit: 10 });
+        const me = await playerRank(h.ctx, { userId: h.userId });
+        return [send(h.conv, T.leaderboard('global', entries, me))];
+      }
+      const entries = await scaryLeaderboard(h.ctx, { groupId: h.groupId, limit: 10 });
+      const me = await playerRank(h.ctx, { userId: h.userId, groupId: h.groupId });
+      const globalTop = await scaryLeaderboard(h.ctx, { limit: 3 });
+      return [send(h.conv, T.leaderboard('group', entries, me, globalTop))];
     }
   }
 }
@@ -676,34 +684,14 @@ export async function handleButton(
         answer(h.conv, click.callbackId),
         send(h.conv, T.cave(await playerProfile(h.ctx, h.userId), now(h)), { reply: false }),
       ];
-    case 'global_board': {
-      // Only on messages sent before the global list became private-chat only.
-      if (h.conv.chatKind !== 'private')
-        return [answer(h.conv, click.callbackId, T.globalBoardInPrivate, true)];
-      const entries = await scaryLeaderboard(h.ctx, { limit: 10 });
-      const me = await playerFearRank(h.ctx, { userId: h.userId });
-      return [
-        answer(h.conv, click.callbackId),
-        send(h.conv, T.leaderboard('global', entries, me), { reply: false }),
-      ];
-    }
-    case 'equip': {
-      const r = await equipTool(h.ctx, { userId: h.userId, tool: params.tool as ToolKind });
-      const text =
-        r.status === 'ok'
-          ? T.equipped(r.tool)
-          : r.status === 'not_owned'
-            ? T.toolNotOwned(r.tool)
-            : T.banned;
-      return [answer(h.conv, click.callbackId, text), replace(text)];
-    }
     case 'prompt': {
+      // A menu button: the preview comes as a new message, so the menu stays usable.
       const op = params.op as string;
       delete params.op;
       const pv = await preview(h, op, params);
       return [
         answer(h.conv, click.callbackId),
-        replace(pv.text, pv.rows ? await buttons(h, pv.rows) : undefined),
+        send(h.conv, pv.text, pv.rows ? { buttons: await buttons(h, pv.rows) } : {}),
       ];
     }
     case 'confirm': {

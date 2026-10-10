@@ -102,7 +102,7 @@ export async function processEvent(deps: BotDeps, event: IncomingEvent): Promise
         const conv = conversation(event.chat, event.platform);
         const now = ctx.clock.now();
         return (await openEncountersOfGroup(ctx, result.groupId)).map((g) =>
-          send(conv, T.ghostRepost(g.ownerName, g.text, g.fearReward, g.expiresAt, now), {
+          send(conv, T.ghostRepost(g.ownerName, g.text, g.rewardPerMemberCenti, g.expiresAt, now), {
             reply: false,
             onSent: { type: 'ghost_repost', encounterId: g.encounterId },
           }),
@@ -271,14 +271,20 @@ async function processButton(deps: BotDeps, event: ButtonClickEvent): Promise<Pr
       now: ctx.clock.now(),
     });
     if (claim.status !== 'ok') {
-      const text = {
-        invalid: T.button.invalid,
-        not_yours: T.button.notYours,
-        used: T.button.used,
-        expired: T.button.expired,
-      }[claim.status];
+      const text =
+        claim.status === 'expired'
+          ? T.button.expired(claim.ttlSeconds)
+          : { invalid: T.button.invalid, not_yours: T.button.notYours, used: T.button.used }[
+              claim.status
+            ];
+      deps.log.debug('button rejected', { updateId: event.updateId, reason: claim.status });
       return [answer(conv, event.callbackId, text, true)];
     }
+    deps.log.debug('button accepted', {
+      updateId: event.updateId,
+      action: claim.button.action,
+      menu: claim.button.expiresAt === null,
+    });
     const h: HandlerContext = {
       ctx,
       conv,

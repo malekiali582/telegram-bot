@@ -1,5 +1,5 @@
-import { foodEffects, inTransaction, playerState } from '@lulu/database';
-import { and, eq, lte } from 'drizzle-orm';
+import { inTransaction, playerState } from '@lulu/database';
+import { eq } from 'drizzle-orm';
 import type { DomainContext } from './context.ts';
 import { DomainError } from './context.ts';
 import {
@@ -9,18 +9,19 @@ import {
   isCoolingDown,
   startCooldown,
 } from './cooldowns.ts';
-import { foodBonusPoints, foodWindowStart, mealsOverlapping } from './food.ts';
 import { groupBuffs } from './groups.ts';
 import { postTransaction, systemWalletId, userWallets } from './ledger.ts';
 import { pointsToCenti } from './money.ts';
 import { beginPlayerAction, touchMembership } from './players.ts';
+import { recordStreakDay } from './streaks.ts';
 
 export type LoloResult =
   | {
       status: 'ok';
       basePoints: number;
-      foodBonusPoints: bigint;
       cashCenti: bigint;
+      /** Today's streak in this group (paid after midnight). */
+      streak: number;
       nextAvailableAt: Date;
       transactionId: number;
     }
@@ -35,9 +36,9 @@ export type LoloResult =
 
 /**
  * «لولو» in a group. One shared cooldown across all groups (player lock + stored
- * availability). Pays a uniform random base reward for the level plus the food bonus
- * of the window since the last successful lolo (at most the claim window). A lolo
- * during the cooldown changes nothing, so it consumes no food bonus either.
+ * availability). Pays a uniform random base reward for the level. Food is paid by its
+ * own deposits (settleFood), not through «لولو». A lolo during the cooldown changes
+ * nothing.
  */
 export async function claimLolo(
   ctx: DomainContext,
@@ -71,18 +72,8 @@ export async function claimLolo(
     if (!level) throw new DomainError('bad_level', `no config for level ${player.level}`);
     const basePoints = ctx.rng.int(level.rewardMin, level.rewardMax);
 
-    const windowStart = foodWindowStart(
-      player.lastLoloAt,
-      player.startedAt,
-      now,
-      config.food.claimWindowSeconds,
-    );
-    const meals = await mealsOverlapping(tx, input.userId, windowStart, now);
-    const bonus = foodBonusPoints(meals, windowStart, now);
-
     const wallets = await userWallets(tx, input.userId);
     const baseCenti = pointsToCenti(basePoints);
-    const bonusCenti = pointsToCenti(bonus);
     const transactionId = await postTransaction(tx, {
       kind: 'lolo_reward',
       effectiveAt: now,
@@ -92,14 +83,8 @@ export async function claimLolo(
       entries: [
         { walletId: await systemWalletId(tx, 'mint:lolo'), amount: -baseCenti },
         { walletId: wallets.cash.id, amount: baseCenti },
-        { walletId: await systemWalletId(tx, 'mint:food'), amount: -bonusCenti },
-        { walletId: wallets.cash.id, amount: bonusCenti },
       ],
-      metadata: {
-        basePoints,
-        foodBonusPoints: bonus.toString(),
-        windowStart: windowStart.toISOString(),
-      },
+      metadata: { basePoints },
     });
 
     await tx
@@ -122,17 +107,13 @@ export async function claimLolo(
       effectiveSeconds,
     });
     await touchMembership(tx, input.groupId, input.userId, now, true);
-
-    // Meals that ended by now can never overlap a future window (it starts at >= now).
-    await tx
-      .delete(foodEffects)
-      .where(and(eq(foodEffects.userId, input.userId), lte(foodEffects.expiresAt, now)));
+    const streak = await recordStreakDay(tx, { userId: input.userId, groupId: input.groupId, now });
 
     return {
       status: 'ok',
       basePoints,
-      foodBonusPoints: bonus,
-      cashCenti: wallets.cash.balance + baseCenti + bonusCenti,
+      cashCenti: wallets.cash.balance + baseCenti,
+      streak,
       nextAvailableAt,
       transactionId,
     };

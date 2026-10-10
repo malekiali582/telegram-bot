@@ -8,15 +8,17 @@ import {
   ghostMessageRefs,
   ghostStories,
   inTransaction,
-  playerState,
   settlements,
   users,
+  wallets,
 } from '@lulu/database';
-import { and, eq, gt, isNull, notInArray, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, notInArray } from 'drizzle-orm';
+import { activeMemberIds } from './city.ts';
 import type { DomainContext } from './context.ts';
 import { claimWaitNotice, cooldownAvailableAt, isCoolingDown, startCooldown } from './cooldowns.ts';
 import { activateDueBatches } from './ghost-batches.ts';
-import { postTransaction } from './ledger.ts';
+import { postTransaction, systemWalletId } from './ledger.ts';
+import { pointsToCenti } from './money.ts';
 import { beginPlayerAction, touchMembership } from './players.ts';
 import { addDays, tehranDate, tehranMidnight } from './tehran.ts';
 
@@ -27,19 +29,15 @@ export interface Chance {
 }
 
 /**
- * max(floor, base(city) × 0.9^failures), exactly (spec §12). The base grows by the
- * per-level bonus with the city level; the multiplier and floor are owner rules.
+ * max(floor, base(city) − step × failures) (spec §12): 30 %, 29 %, 28 % … in a level-1
+ * city. The base grows by the per-level bonus with the city level; the step and the
+ * floor are owner rules. Failures reset when a ghost is found and at Tehran midnight.
  */
 export function ghostChance(config: GameConfig, cityLevel: number, failures: number): Chance {
   const g = config.ghosts;
-  const scale = BigInt(BP_SCALE);
-  const base = BigInt(g.baseChanceBp + g.cityLevelBonusBp * (cityLevel - 1));
-  const numerator = base * BigInt(g.failureMultiplierBp) ** BigInt(failures);
-  const denominator = scale * scale ** BigInt(failures);
-  const floor = BigInt(g.minChanceBp);
-  return numerator * scale < floor * denominator
-    ? { numerator: floor, denominator: scale }
-    : { numerator, denominator };
+  const base = g.baseChanceBp + g.cityLevelBonusBp * (cityLevel - 1);
+  const chance = Math.max(g.minChanceBp, base - g.failureStepBp * failures);
+  return { numerator: BigInt(chance), denominator: BigInt(BP_SCALE) };
 }
 
 /** A roll in [0, 10 000) succeeds when roll / 10 000 < chance. */
@@ -52,24 +50,33 @@ export type GhostSearchResult =
       status: 'found';
       encounterId: number;
       text: string;
-      fearReward: number;
+      rewardPerMemberCenti: bigint;
       expiresAt: Date;
       foundToday: number;
       dailyLimit: number;
+      attemptsLeft: number;
       nextAvailableAt: Date;
     }
-  | { status: 'not_found'; consecutiveFailures: number; nextChance: Chance; nextAvailableAt: Date }
+  | {
+      status: 'not_found';
+      consecutiveFailures: number;
+      nextChance: Chance;
+      attemptsLeft: number;
+      nextAvailableAt: Date;
+    }
   | { status: 'daily_limit'; dailyLimit: number; resetsAt: Date }
+  | { status: 'no_attempts'; dailyAttempts: number; resetsAt: Date }
   | { status: 'no_content' }
   | { status: 'cooldown'; availableAt: Date; remainingMs: number; notify: boolean }
   | { status: 'banned' };
 
 /**
- * «جستجوی روح» in a group. At most `dailyLimit` (3) ghosts per player per Tehran day
- * across all groups; a found ghost uses the quota even before «شنیدم». Counters and
- * consecutive failures are per Tehran day, so they reset at midnight, while the
- * cooldown is an instant and survives midnight. Without live content nothing is
- * consumed. The fear reward is fixed when the ghost is found.
+ * «جستجوی روح» in a group. Per player per Tehran day, across all groups: at most
+ * `dailyAttempts` (10) attempts and `dailyLimit` (3) ghosts found; a found ghost uses
+ * the quota even before «شنیدم». Counters and consecutive failures are per Tehran day,
+ * so they reset at midnight, while the cooldown (10 minutes) is an instant and survives
+ * midnight. Without live content nothing is consumed. The reward per group member is
+ * fixed when the ghost is found.
  */
 export async function searchGhost(
   ctx: DomainContext,
@@ -90,12 +97,13 @@ export async function searchGhost(
       .where(and(eq(dailyGhostState.userId, input.userId), eq(dailyGhostState.tehranDate, today)));
     const foundToday = daily?.foundCount ?? 0;
     const failures = daily?.consecutiveFailures ?? 0;
+    const attempts = daily?.attempts ?? 0;
+    const resetsAt = tehranMidnight(addDays(today, 1));
     if (foundToday >= config.ghosts.dailyLimit) {
-      return {
-        status: 'daily_limit',
-        dailyLimit: config.ghosts.dailyLimit,
-        resetsAt: tehranMidnight(addDays(today, 1)),
-      };
+      return { status: 'daily_limit', dailyLimit: config.ghosts.dailyLimit, resetsAt };
+    }
+    if (attempts >= config.ghosts.dailyAttempts) {
+      return { status: 'no_attempts', dailyAttempts: config.ghosts.dailyAttempts, resetsAt };
     }
 
     const availableAt = await cooldownAvailableAt(tx, input.userId, 'ghost');
@@ -148,6 +156,8 @@ export async function searchGhost(
 
     const newFound = found ? foundToday + 1 : foundToday;
     const newFailures = found ? 0 : failures + 1;
+    const newAttempts = attempts + 1;
+    const attemptsLeft = config.ghosts.dailyAttempts - newAttempts;
     await tx
       .insert(dailyGhostState)
       .values({
@@ -155,10 +165,11 @@ export async function searchGhost(
         tehranDate: today,
         foundCount: newFound,
         consecutiveFailures: newFailures,
+        attempts: newAttempts,
       })
       .onConflictDoUpdate({
         target: [dailyGhostState.userId, dailyGhostState.tehranDate],
-        set: { foundCount: newFound, consecutiveFailures: newFailures },
+        set: { foundCount: newFound, consecutiveFailures: newFailures, attempts: newAttempts },
       });
 
     if (!found) {
@@ -169,18 +180,19 @@ export async function searchGhost(
         groupId: input.groupId,
         configVersionId: versionId,
         entries: [],
-        metadata: { found: false, consecutiveFailures: newFailures },
+        metadata: { found: false, consecutiveFailures: newFailures, attempts: newAttempts },
       });
       return {
         status: 'not_found',
         consecutiveFailures: newFailures,
         nextChance: ghostChance(config, city?.level ?? 1, newFailures),
+        attemptsLeft,
         nextAvailableAt,
       };
     }
 
     const story = candidates[ctx.rng.int(0, candidates.length - 1)]!;
-    const fearReward = ctx.rng.int(config.ghosts.fearMin, config.ghosts.fearMax);
+    const rewardPerMemberCenti = pointsToCenti(config.ghosts.rewardPerMember);
     const expiresAt = new Date(now.getTime() + config.ghosts.replyDeadlineHours * 3_600_000);
     const [encounter] = await tx
       .insert(ghostEncounters)
@@ -190,7 +202,7 @@ export async function searchGhost(
         storyId: story.id,
         tehranDate: today,
         textSnapshot: story.text,
-        fearReward,
+        rewardPerMemberCenti,
         foundAt: now,
         expiresAt,
         platform: input.platform,
@@ -205,16 +217,22 @@ export async function searchGhost(
       groupId: input.groupId,
       configVersionId: versionId,
       entries: [],
-      metadata: { found: true, encounterId: encounter.id, fearReward },
+      metadata: {
+        found: true,
+        encounterId: encounter.id,
+        attempts: newAttempts,
+        rewardPerMemberCenti: rewardPerMemberCenti.toString(),
+      },
     });
     return {
       status: 'found',
       encounterId: encounter.id,
       text: story.text,
-      fearReward,
+      rewardPerMemberCenti,
       expiresAt,
       foundToday: newFound,
       dailyLimit: config.ghosts.dailyLimit,
+      attemptsLeft,
       nextAvailableAt,
     };
   });
@@ -232,7 +250,13 @@ export async function attachEncounterMessage(
 }
 
 export type HeardResult =
-  | { status: 'ok'; fearReward: number; totalFear: number }
+  | {
+      status: 'ok';
+      rewardPerMemberCenti: bigint;
+      /** Active members paid, the finder included. */
+      members: number;
+      totalCenti: bigint;
+    }
   /** «شنیدم» typed without replying to a message: show guidance only. */
   | { status: 'no_reply' }
   | { status: 'not_a_ghost' }
@@ -244,10 +268,12 @@ export type HeardResult =
   | { status: 'banned' };
 
 /**
- * «شنیدم» as a reply to the ghost message. Only the ghost's owner is rewarded, only
- * once, and only before the deadline, and only as a reply to the original ghost message
- * in the chat where it was posted (never another group or a forwarded copy). Switching the live batch never invalidates an
- * encounter: the text and reward were stored with it.
+ * «شنیدم» as a reply to the ghost message, by the finder only, once, before the
+ * deadline, and only as a reply to the original ghost message in the chat where it was
+ * posted (never another group or a forwarded copy). It pays the encounter's reward to
+ * every active member of the ghost's group, the finder included, in one transaction;
+ * the finder gets nothing extra. Without «شنیدم» nobody is paid. Switching the live
+ * batch never invalidates an encounter: the text and reward were stored with it.
  */
 export async function hearGhost(
   ctx: DomainContext,
@@ -321,20 +347,42 @@ export async function hearGhost(
       .update(ghostEncounters)
       .set({ heardAt: now })
       .where(eq(ghostEncounters.id, encounter.id));
-    const [state] = await tx
-      .update(playerState)
-      .set({ fear: sql`${playerState.fear} + ${encounter.fearReward}`, updatedAt: now })
-      .where(eq(playerState.userId, input.userId))
-      .returning({ fear: playerState.fear });
+
+    // «Member»: a successful activity in this group within the window, not banned and
+    // not gone. The finder just found the ghost here, so is always one of them.
+    const { config } = await ctx.config.effectiveAt(tx, now);
+    const members = new Set(
+      await activeMemberIds(tx, encounter.groupId, now, config.ghosts.memberActivityWindowDays),
+    );
+    members.add(input.userId);
+    const memberIds = [...members].sort((a, b) => a - b);
+    const cashWallets = await tx
+      .select({ id: wallets.id })
+      .from(wallets)
+      .where(and(inArray(wallets.userId, memberIds), eq(wallets.kind, 'user_cash')));
+    const reward = encounter.rewardPerMemberCenti;
+    const total = reward * BigInt(cashWallets.length);
     await postTransaction(tx, {
       kind: 'ghost_heard',
       effectiveAt: now,
       userId: input.userId,
       groupId: encounter.groupId,
-      entries: [],
-      metadata: { encounterId: encounter.id, fearReward: encounter.fearReward },
+      entries: [
+        { walletId: await systemWalletId(tx, 'mint:ghost'), amount: -total },
+        ...cashWallets.map((w) => ({ walletId: w.id, amount: reward })),
+      ],
+      metadata: {
+        encounterId: encounter.id,
+        rewardPerMemberCenti: reward.toString(),
+        members: memberIds,
+      },
     });
-    return { status: 'ok', fearReward: encounter.fearReward, totalFear: state?.fear ?? 0 };
+    return {
+      status: 'ok',
+      rewardPerMemberCenti: reward,
+      members: cashWallets.length,
+      totalCenti: total,
+    };
   });
 }
 
@@ -361,7 +409,7 @@ export interface OpenEncounter {
   /** Untrusted display text. */
   ownerName: string;
   text: string;
-  fearReward: number;
+  rewardPerMemberCenti: bigint;
   expiresAt: Date;
 }
 
@@ -376,7 +424,7 @@ export async function openEncountersOfGroup(
       userId: ghostEncounters.userId,
       ownerName: users.displayName,
       text: ghostEncounters.textSnapshot,
-      fearReward: ghostEncounters.fearReward,
+      rewardPerMemberCenti: ghostEncounters.rewardPerMemberCenti,
       expiresAt: ghostEncounters.expiresAt,
     })
     .from(ghostEncounters)

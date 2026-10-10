@@ -1,20 +1,28 @@
 /**
- * Acceptance 3 (spec §19.3): meal capacity, start and end times, partial use of the
- * window, the 300 s cap, a meal that just expired, and no double claim.
+ * Acceptance 3 (spec §19.3): meal capacity, start and end times, and the automatic
+ * deposits: every 5 minutes for 30 minutes, the food's fixed amount goes into cash,
+ * without «لولو», exactly once each, however late it is settled.
  */
 import { foodEffects } from '@lulu/database';
 import { testBackend } from '@lulu/database/testing';
-import { claimLolo, eat, upgradeLevel } from '@lulu/domain';
+import {
+  claimLolo,
+  eat,
+  playerProfile,
+  settleDuePlayers,
+  treasuryView,
+  upgradeLevel,
+} from '@lulu/domain';
 import type { TestGame } from '@lulu/domain/testing';
 import {
   TEST_START,
+  cashOf,
   createTestGame,
   foodOf,
   giveFood,
   grantPoints,
   newGroup,
   newPlayer,
-  setCurseLevel,
   setLevel,
 } from '@lulu/domain/testing';
 import { eq } from 'drizzle-orm';
@@ -37,14 +45,14 @@ beforeEach(() => {
 });
 
 const at = (seconds: number) => game.clock.set(new Date(T0 + seconds * 1000));
-const lolo = (userId: number, groupId = group) => claimLolo(game.ctx, { userId, groupId });
-const bonusOf = async (userId: number, groupId = group) => {
-  const result = await lolo(userId, groupId);
-  if (result.status !== 'ok') throw new Error(`expected ok, got ${result.status}`);
-  return result.foodBonusPoints;
+/** Cash in whole points, after settling (any player action settles first). */
+const settledCash = async (userId: number) => {
+  const v = await treasuryView(game.ctx, userId);
+  if (v.status !== 'ok') throw new Error(v.status);
+  return v.cashCenti / 100n;
 };
 
-/** Player at `level` with food, registered at T0 and with a first lolo at T0. */
+/** Player at `level` with food, registered at T0. */
 async function player(level: number, food: Record<string, number> = { bone: 10, mouse: 10 }) {
   at(0);
   const userId = await newPlayer(game);
@@ -87,6 +95,9 @@ describe(`acceptance 3 — meal capacity (${testBackend()})`, () => {
       status: 'ok',
       startedAt: new Date(T0),
       expiresAt: new Date(T0 + 1_800_000),
+      pointsPerDeposit: 3,
+      depositsTotal: 6,
+      depositIntervalSeconds: 300,
     });
     game.clock.set(new Date(T0 + 1_799_999));
     expect(await eat(game.ctx, { userId, food: 'bone', count: 1 })).toMatchObject({
@@ -113,7 +124,10 @@ describe(`acceptance 3 — meal capacity (${testBackend()})`, () => {
       .select()
       .from(foodEffects)
       .where(eq(foodEffects.userId, userId));
-    expect(meals.map((m) => m.pointsPerSecond)).toEqual([45, 45]); // 5 × nutrition 9
+    expect(meals.map((m) => [m.depositCenti, m.depositsTotal, m.depositsPaid])).toEqual([
+      [15_000n, 6, 0],
+      [15_000n, 6, 0],
+    ]);
   });
 
   it('lets only one of two concurrent meals into the last slot', async () => {
@@ -136,111 +150,95 @@ describe(`acceptance 3 — meal capacity (${testBackend()})`, () => {
   });
 });
 
-describe(`acceptance 3 — food bonus on lolo (${testBackend()})`, () => {
-  it('spec example: a bone active for the whole window adds 1500', async () => {
-    const userId = await player(3);
-    await lolo(userId); // T0
-    await eat(game.ctx, { userId, food: 'bone', count: 1 }); // T0
-    at(300);
-    expect(await bonusOf(userId)).toBe(1500n);
+describe(`acceptance 3 — automatic food deposits (${testBackend()})`, () => {
+  it('pays the owner amounts: 6 deposits per meal, in food order', async () => {
+    const amounts = { bone: 3, mouse: 20, chicken: 70, pig: 150, sheep: 270, cow: 360, deer: 500 };
+    for (const [food, perDeposit] of Object.entries(amounts)) {
+      const userId = await player(5, { [food]: 1 });
+      await eat(game.ctx, { userId, food: food as 'bone', count: 1 });
+      at(1800);
+      expect(await settledCash(userId), food).toBe(BigInt(perDeposit * 6));
+    }
   });
 
-  it('spec example: a mouse eaten 120 s before the lolo adds 1200', async () => {
-    const userId = await player(3);
-    await lolo(userId);
-    at(180);
+  it('pays 1000 per deposit for a human meal', async () => {
+    const userId = await player(6, { human: 1 });
+    await eat(game.ctx, { userId, food: 'human', count: 1 });
+    at(1800);
+    expect(await settledCash(userId)).toBe(6_000n);
+  });
+
+  it('deposits at +5, +10 … +30 minutes, not before', async () => {
+    const userId = await player(3, { mouse: 1 });
+    await eat(game.ctx, { userId, food: 'mouse', count: 1 }); // 20 per deposit
+    game.clock.set(new Date(T0 + 299_999));
+    expect(await settledCash(userId)).toBe(0n);
+    at(300);
+    expect(await settledCash(userId)).toBe(20n);
+    at(899);
+    expect(await settledCash(userId)).toBe(40n);
+    at(900);
+    expect(await settledCash(userId)).toBe(60n);
+    at(5000);
+    expect(await settledCash(userId)).toBe(120n);
+  });
+
+  it('needs no «لولو»: the worker pays an idle player', async () => {
+    const userId = await player(3, { mouse: 2 });
+    await eat(game.ctx, { userId, food: 'mouse', count: 2 });
+    at(600);
+    await settleDuePlayers(game.ctx);
+    expect(await cashOf(game, userId)).toBe(8_000n); // 2 meals × 2 deposits × 20 points
+  });
+
+  it('never pays a deposit twice, however often it is settled', async () => {
+    const userId = await player(3, { mouse: 1 });
+    await eat(game.ctx, { userId, food: 'mouse', count: 1 });
+    for (const s of [300, 300, 301, 650, 650, 1200, 1800, 1800, 4000]) {
+      at(s);
+      await settleDuePlayers(game.ctx);
+      await settledCash(userId);
+    }
+    expect(await cashOf(game, userId)).toBe(12_000n);
+    const left = await game.ctx.db.select().from(foodEffects).where(eq(foodEffects.userId, userId));
+    expect(left).toEqual([]); // fully paid meals are removed
+  });
+
+  it('pays lolo only its base reward; food never goes through lolo', async () => {
+    const userId = await player(3, { mouse: 1 });
     await eat(game.ctx, { userId, food: 'mouse', count: 1 });
     at(300);
-    expect(await bonusOf(userId)).toBe(1200n);
+    const result = await claimLolo(game.ctx, { userId, groupId: group });
+    // the deposit due at +5 min is settled first; lolo adds just its base (50 at level 3)
+    expect(result).toMatchObject({ status: 'ok', basePoints: 50, cashCenti: 7_000n });
   });
 
-  it('caps the window at 300 s however long since the last lolo', async () => {
-    const userId = await player(3);
-    await lolo(userId);
-    await eat(game.ctx, { userId, food: 'bone', count: 1 });
-    at(1000);
-    expect(await bonusOf(userId)).toBe(1500n);
-  });
-
-  it('spec example: no bonus from a meal that expired before the last 5 minutes', async () => {
-    const userId = await player(3);
-    await lolo(userId);
-    await eat(game.ctx, { userId, food: 'bone', count: 1 });
-    at(2400); // 40 minutes without lolo; the meal ended at 30 minutes
-    expect(await bonusOf(userId)).toBe(0n);
-  });
-
-  it('counts a meal that expired one minute ago for the 4 minutes it covered', async () => {
-    const userId = await player(3);
-    await lolo(userId);
-    await eat(game.ctx, { userId, food: 'bone', count: 1 });
-    at(1500);
-    expect(await bonusOf(userId)).toBe(1500n);
-    at(1860); // meal ended at 1800; window [1560, 1860)
-    expect(await bonusOf(userId)).toBe(1200n);
-  });
-
-  it('never pays the same seconds twice, and a lolo during cooldown consumes nothing', async () => {
-    const userId = await player(3);
-    await lolo(userId);
-    await eat(game.ctx, { userId, food: 'bone', count: 1 });
-    at(100);
-    expect(await lolo(userId)).toMatchObject({ status: 'cooldown' });
-    at(300);
-    expect(await bonusOf(userId)).toBe(1500n);
-    at(600);
-    expect(await bonusOf(userId)).toBe(1500n);
-    // total over 600 s of one bone is exactly 600 × 5
-  });
-
-  it('uses the account start before the first successful lolo', async () => {
-    const userId = await player(3);
-    await eat(game.ctx, { userId, food: 'bone', count: 1 }); // T0, account start
-    at(120);
-    expect(await bonusOf(userId)).toBe(600n);
-  });
-
-  it('a shorter cooldown from a buff does not enlarge the window', async () => {
-    const buffed = await newGroup(game, 'پژواک');
-    await setCurseLevel(game, buffed, 'lolo_echo', 4); // 240 s
-    const userId = await player(3);
-    await lolo(userId, buffed);
-    await eat(game.ctx, { userId, food: 'bone', count: 1 });
-    at(240);
-    expect(await bonusOf(userId, buffed)).toBe(1200n);
-  });
-
-  it('with a buffed 240 s cooldown, seconds already paid are never paid again', async () => {
-    const buffed = await newGroup(game, 'پژواک ۲');
-    await setCurseLevel(game, buffed, 'lolo_echo', 4);
-    const userId = await player(3);
-    await eat(game.ctx, { userId, food: 'bone', count: 1 }); // T0
-    at(100);
-    expect(await bonusOf(userId, buffed)).toBe(500n); // [T0, T0+100)
-    at(340);
-    // window is [T0+100, T0+340): 240 s, not the 300 s that would re-pay [T0+40, T0+100)
-    expect(await bonusOf(userId, buffed)).toBe(1200n);
+  it('pays every meal of a multi-meal request', async () => {
+    const userId = await player(4, { chicken: 3 });
+    await eat(game.ctx, { userId, food: 'chicken', count: 3 });
+    at(1800);
+    expect(await settledCash(userId)).toBe(3n * 70n * 6n);
   });
 
   it('keeps running meals and their timing across a level upgrade', async () => {
-    const userId = await player(2);
-    await lolo(userId);
+    const userId = await player(2, { bone: 1 });
     await eat(game.ctx, { userId, food: 'bone', count: 1 });
     await grantPoints(game, userId, 6_000);
     at(100);
     expect(await upgradeLevel(game.ctx, { userId, expectedLevel: 2 })).toMatchObject({
       status: 'ok',
     });
-    at(300);
-    expect(await bonusOf(userId)).toBe(1500n);
+    at(1800);
+    expect(await settledCash(userId)).toBe(18n);
   });
 
-  it('adds several meals, rounding only the total down', async () => {
-    const userId = await player(3);
-    await lolo(userId);
-    game.clock.set(new Date(T0 + 199_900));
-    await eat(game.ctx, { userId, food: 'bone', count: 2 }); // each overlaps 100.1 s
-    at(300);
-    expect(await bonusOf(userId)).toBe(1001n);
+  it('shows running meals with the deposits still to come', async () => {
+    const userId = await player(3, { mouse: 1 });
+    await eat(game.ctx, { userId, food: 'mouse', count: 1 });
+    at(700);
+    const profile = await playerProfile(game.ctx, userId);
+    expect(profile.meals.active).toEqual([
+      { food: 'mouse', expiresAt: new Date(T0 + 1_800_000), depositCenti: 2_000n, depositsLeft: 4 },
+    ]);
   });
 });
