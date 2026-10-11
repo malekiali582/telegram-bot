@@ -14,7 +14,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import https from 'node:https';
 import { join } from 'node:path';
 import { devEnvSchema, parseEnv, telegramEnvSchema } from '@lulu/config';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import pg from 'pg';
+import { redactProxy, telegramNetworkHints } from './dev-network.ts';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 
@@ -32,11 +34,27 @@ try {
 }
 const hide = (text: string) => text.split(token).join('[token]');
 
-/** Bot API call over IPv4, like the bot itself (see connectTelegram). */
+let dev: ReturnType<typeof parseEnv<typeof devEnvSchema>>;
+try {
+  dev = parseEnv(devEnvSchema);
+} catch (err) {
+  bad(
+    `تنظیمات حالت توسعه در .env نامعتبر است: ${err instanceof Error ? err.message : String(err)}`,
+  );
+  process.exit(1);
+}
+const proxyAgent = dev.TELEGRAM_PROXY ? new HttpsProxyAgent(dev.TELEGRAM_PROXY) : undefined;
+
+/** Bot API call like the bot itself: over IPv4, or through TELEGRAM_PROXY (see connectTelegram). */
 function telegram<T>(method: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = https.get(
-      { host: 'api.telegram.org', path: `/bot${token}/${method}`, family: 4, timeout: 15_000 },
+      {
+        host: 'api.telegram.org',
+        path: `/bot${token}/${method}`,
+        ...(proxyAgent ? { agent: proxyAgent } : { family: 4 }),
+        timeout: 15_000,
+      },
       (res) => {
         let text = '';
         res.setEncoding('utf8');
@@ -67,6 +85,11 @@ function describe(err: unknown): string {
 
 // ── 1. Telegram ──
 say('\n۱) تلگرام');
+say(
+  dev.TELEGRAM_PROXY
+    ? `  (از پراکسی ${redactProxy(dev.TELEGRAM_PROXY)} — TELEGRAM_PROXY در .env)`
+    : '  (اتصال مستقیم؛ TELEGRAM_PROXY تنظیم نشده)',
+);
 try {
   const me = await telegram<{ username: string; can_read_all_group_messages?: boolean }>('getMe');
   ok(`توکن معتبر است و مال ربات @${me.username} است. مطمئن شوید به همین ربات پیام می‌دهید.`);
@@ -101,7 +124,7 @@ try {
   }
 } catch (err) {
   bad(`تلگرام در دسترس نیست یا توکن را رد کرد: ${describe(err)}`);
-  say('     فیلترشکن باید روی کل سیستم (System/TUN) باشد؛ پراکسی مرورگر روی Node اثری ندارد.');
+  for (const hint of await telegramNetworkHints(dev.TELEGRAM_PROXY)) say(`     ${hint}`);
 }
 
 // ── 2. dev database ──
@@ -112,7 +135,7 @@ if (!existsSync(credentials)) {
   process.exit(0);
 }
 const { password } = JSON.parse(readFileSync(credentials, 'utf8')) as { password: string };
-const { DEV_DB_PORT } = parseEnv(devEnvSchema);
+const { DEV_DB_PORT } = dev;
 const client = new pg.Client({
   connectionString: `postgres://lulu:${encodeURIComponent(password)}@127.0.0.1:${DEV_DB_PORT}/lulu_dev`,
   application_name: 'lulu-dev-doctor',

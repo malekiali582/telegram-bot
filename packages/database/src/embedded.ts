@@ -15,7 +15,35 @@ export interface EmbeddedPostgresOptions {
   password?: string;
   /** Keep the data directory after `stop()` (dev mode) or delete it (tests). */
   persistent: boolean;
+  /** Give up (and stop the server) if it does not accept connections by then. Default 60 s. */
+  startTimeoutMs?: number;
 }
+
+/**
+ * The server did not come up. `log` holds its last output lines: PostgreSQL says why
+ * there (port in use, another server on the same data directory, damaged files…).
+ */
+export class EmbeddedPostgresStartError extends Error {
+  readonly reason: 'timeout' | 'exited';
+  readonly log: string[];
+
+  constructor(reason: 'timeout' | 'exited', log: string[], options?: ErrorOptions) {
+    const what =
+      reason === 'timeout'
+        ? 'did not accept connections in time'
+        : 'stopped before it accepted connections';
+    super(
+      `embedded PostgreSQL ${what}` +
+        (log.length ? `; last log lines:\n${log.join('\n')}` : ' (no log output)'),
+      options,
+    );
+    this.name = 'EmbeddedPostgresStartError';
+    this.reason = reason;
+    this.log = log;
+  }
+}
+
+const LOG_LINES_KEPT = 20;
 
 export interface RunningPostgres {
   /** Connection URL for the default `postgres` database. */
@@ -45,7 +73,14 @@ export async function startEmbeddedPostgres(
   const port = options.port ?? (await freePort());
   const user = options.user ?? 'lulu';
   const password = options.password ?? 'lulu-local-only';
-  const errors: string[] = [];
+  const recentLog: string[] = [];
+  const keep = (output: unknown) => {
+    const text = output instanceof Error ? output.message : String(output);
+    for (const line of text.split(/\r?\n/)) {
+      if (line.trim()) recentLog.push(line);
+    }
+    recentLog.splice(0, recentLog.length - LOG_LINES_KEPT);
+  };
 
   const server = new EmbeddedPostgres({
     databaseDir: options.dataDir,
@@ -57,21 +92,33 @@ export async function startEmbeddedPostgres(
     initdbFlags: ['--encoding=UTF8', '--no-locale'],
     // Same as production: store and compare instants in UTC.
     postgresFlags: ['-c', 'timezone=UTC', '-c', 'listen_addresses=127.0.0.1'],
-    onLog: () => {},
-    onError: (e) => {
-      errors.push(e instanceof Error ? e.message : String(e));
-    },
+    onLog: keep,
+    onError: keep,
   });
 
-  try {
+  // `start()` resolves on the "ready to accept connections" log line and rejects (without
+  // a reason) only when the process exits; it never times out on its own.
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(resolve, options.startTimeoutMs ?? 60_000, 'timeout');
+  });
+  const starting = (async () => {
     // A persistent dev cluster is initialised once and reused across runs.
     if (!existsSync(join(options.dataDir, 'PG_VERSION'))) await server.initialise();
     await server.start();
+  })();
+  try {
+    if ((await Promise.race([starting, deadline])) === 'timeout') {
+      // Still running but not ready: stop it, so it does not hold the port or the data directory.
+      await Promise.race([server.stop(), new Promise((r) => setTimeout(r, 10_000))]);
+      throw new EmbeddedPostgresStartError('timeout', recentLog);
+    }
   } catch (err) {
-    const detail = errors.slice(-5).join('\n');
-    throw new Error(`embedded PostgreSQL failed to start${detail ? `:\n${detail}` : ''}`, {
-      cause: err,
-    });
+    if (err instanceof EmbeddedPostgresStartError) throw err;
+    if (err instanceof Error) keep(err.message); // initdb failures carry their output here
+    throw new EmbeddedPostgresStartError('exited', recentLog, { cause: err });
+  } finally {
+    clearTimeout(timer);
   }
 
   const urlFor = (database: string) =>

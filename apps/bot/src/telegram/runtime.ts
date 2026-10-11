@@ -3,6 +3,7 @@ import { Agent as HttpsAgent } from 'node:https';
 import type { Transformer } from 'grammy';
 import { Bot, GrammyError } from 'grammy';
 import type { Update } from 'grammy/types';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import type { Logger } from '@lulu/runtime';
 import type { BotDeps } from '../core/processor.ts';
 import { processEvent } from '../core/processor.ts';
@@ -41,10 +42,32 @@ export interface TelegramBot {
  */
 const telegramAgent = new HttpsAgent({ keepAlive: true, family: 4 });
 
-/** Validates the token (getMe) and builds the adapter. Throws on an invalid token. */
-export async function connectTelegram(token: string): Promise<TelegramBot> {
-  const bot = new Bot(token, { client: { baseFetchConfig: { agent: telegramAgent } } });
-  await bot.init();
+export interface ConnectTelegramOptions {
+  /** Gives up on getMe when this aborts. */
+  signal?: AbortSignal | undefined;
+  /**
+   * HTTP proxy for every Bot API call (`http://host:port`). Development only, for a VPN
+   * in "system proxy" mode; production connects directly. Name resolution happens at
+   * the proxy, so a filtered local DNS answer for api.telegram.org does not matter.
+   */
+  proxy?: string | undefined;
+}
+
+/**
+ * Validates the token (getMe) and builds the adapter. Throws on an invalid token, or
+ * when `signal` aborts first: an unreachable api.telegram.org (e.g. a filtered address)
+ * can otherwise leave getMe waiting for minutes.
+ */
+export async function connectTelegram(
+  token: string,
+  options: ConnectTelegramOptions = {},
+): Promise<TelegramBot> {
+  const agent = options.proxy
+    ? new HttpsProxyAgent(options.proxy, { keepAlive: true })
+    : telegramAgent;
+  const bot = new Bot(token, { client: { baseFetchConfig: { agent } } });
+  // grammY types its parameter with the abort-controller shim; Node's AbortSignal works at runtime.
+  await bot.init(options.signal as Parameters<Bot['init']>[0]);
   return {
     bot,
     botId: bot.botInfo.id,

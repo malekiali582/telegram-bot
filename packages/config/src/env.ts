@@ -144,4 +144,18 @@ export const webhookServerEnvSchema = z.object({
 export const devEnvSchema = z.object({
   DEV_DB_PORT: z.coerce.number().int().min(1024).max(65_535).default(54329),
   LOG_FORMAT: z.enum(['pretty', 'json']).default('pretty'),
+  /**
+   * HTTP proxy for the Bot API, e.g. a VPN app's "system proxy" port. Node ignores the
+   * Windows system proxy, so without this a VPN in proxy mode does not cover the bot.
+   * Development only: the production bot and worker never read this schema.
+   */
+  TELEGRAM_PROXY: optionalNonEmpty.pipe(
+    z
+      .string()
+      .regex(
+        /^https?:\/\/[^\s/]+\/?$/,
+        'must be an http:// proxy address such as http://127.0.0.1:10809 (SOCKS is not supported)',
+      )
+      .optional(),
+  ),
 });

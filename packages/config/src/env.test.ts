@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { EnvError, apiEnvSchema, parseEnv, telegramEnvSchema, workerEnvSchema } from './env.ts';
+import {
+  EnvError,
+  apiEnvSchema,
+  devEnvSchema,
+  parseEnv,
+  telegramEnvSchema,
+  workerEnvSchema,
+} from './env.ts';
 
 const TOKEN = '123456789:AAEhBP0av18Z_abcdefghijklmnopqrstuv';
 const SECRET = 'w3bh00k_s3cret_with_enough_entropy_123';
@@ -89,5 +96,28 @@ describe('worker env', () => {
       WORKER_SETTLE_INTERVAL_MS: 60_000,
       WORKER_OUTBOX_INTERVAL_MS: 1_000,
     });
+  });
+});
+
+describe('dev env', () => {
+  it('leaves TELEGRAM_PROXY unset when it is missing or empty', () => {
+    expect(parseEnv(devEnvSchema, {}).TELEGRAM_PROXY).toBeUndefined();
+    expect(parseEnv(devEnvSchema, { TELEGRAM_PROXY: '  ' }).TELEGRAM_PROXY).toBeUndefined();
+  });
+
+  it('accepts an http(s) proxy address', () => {
+    for (const proxy of [
+      'http://127.0.0.1:12334',
+      'http://user:pass@proxy.local:8080/',
+      'https://p.example:443',
+    ]) {
+      expect(parseEnv(devEnvSchema, { TELEGRAM_PROXY: proxy }).TELEGRAM_PROXY).toBe(proxy);
+    }
+  });
+
+  it('rejects SOCKS and malformed proxy addresses', () => {
+    for (const proxy of ['socks5://127.0.0.1:10808', '127.0.0.1:12334', 'http://host/path']) {
+      expect(() => parseEnv(devEnvSchema, { TELEGRAM_PROXY: proxy })).toThrow(EnvError);
+    }
   });
 });
