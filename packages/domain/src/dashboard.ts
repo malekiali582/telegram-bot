@@ -2,6 +2,7 @@ import { BP_SCALE, CENTI_PER_POINT } from '@lulu/config';
 import { queryRows } from '@lulu/database';
 import { sql } from 'drizzle-orm';
 import type { DomainContext } from './context.ts';
+import { pendingIncome } from './pending-income.ts';
 import { addDays, tehranDate, tehranMidnight } from './tehran.ts';
 
 /**
@@ -62,7 +63,15 @@ export interface EconomyOverview {
     active30d: number;
   };
   groups: { total: number; withBot: number; activeToday: number };
-  circulation: { now: CirculationPoint; daily: CirculationPoint[] };
+  circulation: {
+    now: CirculationPoint;
+    daily: CirculationPoint[];
+    /**
+     * Cemetery income and food deposits earned by idle players since the worker last
+     * settled them (at most about an hour's worth); not yet in the balances above.
+     */
+    pendingCenti: bigint;
+  };
   flows: { today: FlowSummary; week: FlowSummary; month: FlowSummary };
   inflation: {
     status: 'ok' | 'warning' | 'not_enough_data';
@@ -179,6 +188,11 @@ export async function economyOverview(ctx: DomainContext): Promise<EconomyOvervi
   }
   const byDate = new Map(daily.map((p) => [p.date, p]));
 
+  const [pending] = await queryRows<{ total: string }>(
+    db,
+    sql`SELECT coalesce(sum(pending), 0)::text AS total FROM ${pendingIncome(config, now)} p`,
+  );
+
   // ── production and consumption by source ──
   const flows = await queryRows<{
     code: string;
@@ -256,7 +270,11 @@ export async function economyOverview(ctx: DomainContext): Promise<EconomyOvervi
       withBot: counts?.with_bot ?? 0,
       activeToday: activity?.groups_today ?? 0,
     },
-    circulation: { now: daily[daily.length - 1]!, daily },
+    circulation: {
+      now: daily[daily.length - 1]!,
+      daily,
+      pendingCenti: BigInt(pending?.total ?? '0'),
+    },
     flows: { today: window('today'), week: window('week'), month: window('month') },
     inflation: { status, day, week, minCirculationCenti: minCenti },
   };

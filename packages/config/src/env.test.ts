@@ -103,7 +103,6 @@ describe('api env', () => {
 describe('worker env', () => {
   it('has safe defaults', () => {
     expect(parseEnv(workerEnvSchema, {})).toEqual({
-      WORKER_SETTLE_INTERVAL_MS: 60_000,
       WORKER_OUTBOX_INTERVAL_MS: 1_000,
     });
   });

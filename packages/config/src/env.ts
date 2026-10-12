@@ -110,7 +110,6 @@ export const apiEnvSchema = z
   });
 
 export const workerEnvSchema = z.object({
-  WORKER_SETTLE_INTERVAL_MS: z.coerce.number().int().min(1_000).default(60_000),
   WORKER_OUTBOX_INTERVAL_MS: z.coerce.number().int().min(100).default(1_000),
 });
 

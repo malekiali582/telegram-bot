@@ -283,7 +283,6 @@ await step(
       adapters: { telegram: tg.adapter },
       log,
       listenUrl: databaseUrl,
-      settleIntervalMs: 60_000,
       outboxIntervalMs: 1_000,
     });
     cleanups.push(() => worker.stop());

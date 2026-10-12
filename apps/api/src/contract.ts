@@ -121,7 +121,12 @@ export interface DashboardView {
     active30d: number;
   };
   groups: { total: number; withBot: number; activeToday: number };
-  circulation: { now: CirculationView; daily: CirculationView[] };
+  circulation: {
+    now: CirculationView;
+    daily: CirculationView[];
+    /** Earned by idle players but not settled yet (the worker settles hourly). */
+    pending: Centi;
+  };
   flows: { today: FlowView; week: FlowView; month: FlowView };
   inflation: {
     status: 'ok' | 'warning' | 'not_enough_data';

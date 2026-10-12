@@ -28,7 +28,6 @@ const worker = await startWorker({
   adapters: { telegram: tg.adapter },
   log,
   listenUrl: DATABASE_URL,
-  settleIntervalMs: intervals.WORKER_SETTLE_INTERVAL_MS,
   outboxIntervalMs: intervals.WORKER_OUTBOX_INTERVAL_MS,
 });
 log.info('worker started');

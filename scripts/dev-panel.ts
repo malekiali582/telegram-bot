@@ -207,7 +207,6 @@ const worker = await startWorker({
   adapters: { telegram: simulatedAdapter('telegram'), rubika: simulatedAdapter('rubika') },
   log,
   listenUrl: postgres.urlFor(DATABASE),
-  settleIntervalMs: 60_000,
   outboxIntervalMs: 1_000,
 }).catch((err: unknown) => fail(`worker شبیه‌سازی‌شده روشن نشد: ${String(err)}`));
 cleanups.push(() => worker.stop());

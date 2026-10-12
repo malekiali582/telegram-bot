@@ -1,6 +1,6 @@
 import { queryRows } from '@lulu/database';
 import type { DomainContext } from '@lulu/domain';
-import { activateDueBatches, settleDuePlayers } from '@lulu/domain';
+import { activateDueBatches, nextTehranMidnight, settleDuePlayers } from '@lulu/domain';
 import type { JobDefinition } from '@lulu/runtime';
 import { sql } from 'drizzle-orm';
 
@@ -8,15 +8,29 @@ import { sql } from 'drizzle-orm';
  * Periodic jobs. Each one is idempotent: running late, twice, or alongside player
  * actions changes nothing that should not change (see the domain services).
  */
-export function workerJobs(
-  ctx: DomainContext,
-  options: { settleIntervalMs: number },
-): JobDefinition[] {
+/** Run this long after a Tehran midnight, so the new day has surely begun. */
+const AFTER_MIDNIGHT_MS = 5_000;
+
+/**
+ * When the settlement job runs next: every `settlement.periodicIntervalMinutes` (60, a
+ * suggested value), and in any case right after the next Tehran midnight, so interest
+ * and streak rewards of idle players arrive as before.
+ */
+export async function nextSettlementRun(ctx: DomainContext, finishedAt: Date): Promise<Date> {
+  const { config } = await ctx.config.effectiveAt(ctx.db, finishedAt);
+  const periodic = finishedAt.getTime() + config.settlement.periodicIntervalMinutes * 60_000;
+  const midnight = nextTehranMidnight(finishedAt).getTime() + AFTER_MIDNIGHT_MS;
+  return new Date(Math.min(periodic, midnight));
+}
+
+export function workerJobs(ctx: DomainContext): JobDefinition[] {
   return [
     {
-      // Cemetery income and midnight interest, even for players who are offline.
+      // Idle accounts: cemetery income, food deposits, midnight interest, streak rewards.
+      // Amounts never depend on how often this runs (see the domain settlement).
       name: 'settlement',
-      intervalMs: options.settleIntervalMs,
+      intervalMs: 60 * 60_000,
+      nextRunAt: (finishedAt) => nextSettlementRun(ctx, finishedAt),
       leaseMs: 10 * 60_000,
       async run() {
         let afterUserId: number | undefined;

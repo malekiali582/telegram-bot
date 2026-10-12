@@ -36,6 +36,7 @@ describe(`migrations (${testBackend()})`, () => {
       '0006_daily_streaks',
       '0007_sample_markers',
       '0008_panel_monitoring',
+      '0009_settlement_interval',
     ]);
     expect(checksum('a\r\nb')).toBe(checksum('a\nb'));
   });
@@ -53,6 +54,7 @@ describe(`migrations (${testBackend()})`, () => {
       '0006_daily_streaks',
       '0007_sample_markers',
       '0008_panel_monitoring',
+      '0009_settlement_interval',
     ]);
     expect(await migrateDatabase(t)).toEqual({ applied: [] });
   });

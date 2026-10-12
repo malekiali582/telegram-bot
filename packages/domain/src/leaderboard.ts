@@ -1,14 +1,16 @@
+import type { GameConfig } from '@lulu/config';
 import { queryRows } from '@lulu/database';
 import { sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { DomainContext } from './context.ts';
+import { pendingIncome } from './pending-income.ts';
 
 export interface LeaderboardEntry {
   rank: number;
   userId: number;
   /** Untrusted display text. */
   displayName: string;
-  /** Cash + treasury, in centi-points. */
+  /** Cash + treasury + income earned but not yet settled, in centi-points. */
   pointsCenti: bigint;
   level: number;
 }
@@ -33,10 +35,11 @@ const toEntry = (r: RankedRow): LeaderboardEntry => ({
  * «ترسناک‌ترین لولوها»: lolopoints first (cash + treasury, so saving in the treasury
  * never costs rank), then level, then the stable user id. Balances are one global
  * value per player, so a member of several groups appears with the same value
- * everywhere. Banned players are excluded. Balances are as last settled; idle accounts
- * catch up through the worker's periodic settlement.
+ * everywhere. Banned players are excluded. The worker settles idle accounts only
+ * hourly, so cemetery income and food deposits earned since are added here (read-only):
+ * the ranking is the one everybody would have if they had just been settled.
  */
-function ranked(groupId: number | undefined): SQL {
+function ranked(groupId: number | undefined, config: GameConfig, now: Date): SQL {
   const scope =
     groupId === undefined
       ? sql``
@@ -47,9 +50,17 @@ function ranked(groupId: number | undefined): SQL {
            u.id AS user_id, u.display_name, b.points::text AS points, p.level
     FROM users u
     JOIN player_state p ON p.user_id = u.id
-    JOIN (SELECT user_id, sum(balance) AS points FROM wallets
-          WHERE kind IN ('user_cash', 'user_treasury') GROUP BY user_id) b ON b.user_id = u.id
+    JOIN (SELECT w.user_id, sum(w.balance) + coalesce(max(pe.pending), 0) AS points
+          FROM wallets w LEFT JOIN ${pendingIncome(config, now)} pe ON pe.user_id = w.user_id
+          WHERE w.kind IN ('user_cash', 'user_treasury') GROUP BY w.user_id) b
+      ON b.user_id = u.id
     WHERE u.banned_at IS NULL ${scope}`;
+}
+
+async function rankedNow(ctx: DomainContext, groupId: number | undefined): Promise<SQL> {
+  const now = ctx.clock.now();
+  const { config } = await ctx.config.effectiveAt(ctx.db, now);
+  return ranked(groupId, config, now);
 }
 
 export async function scaryLeaderboard(
@@ -58,7 +69,7 @@ export async function scaryLeaderboard(
 ): Promise<LeaderboardEntry[]> {
   const rows = await queryRows<RankedRow>(
     ctx.db,
-    sql`${ranked(input.groupId)} ORDER BY rank LIMIT ${input.limit ?? 10}`,
+    sql`${await rankedNow(ctx, input.groupId)} ORDER BY rank LIMIT ${input.limit ?? 10}`,
   );
   return rows.map(toEntry);
 }
@@ -70,7 +81,7 @@ export async function playerRank(
 ): Promise<LeaderboardEntry | null> {
   const rows = await queryRows<RankedRow>(
     ctx.db,
-    sql`SELECT * FROM (${ranked(input.groupId)}) r WHERE r.user_id = ${input.userId}`,
+    sql`SELECT * FROM (${await rankedNow(ctx, input.groupId)}) r WHERE r.user_id = ${input.userId}`,
   );
   return rows[0] ? toEntry(rows[0]) : null;
 }

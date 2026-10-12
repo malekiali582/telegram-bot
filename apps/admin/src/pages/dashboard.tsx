@@ -229,11 +229,15 @@ export function DashboardPage() {
             `نقد ${formatPoints(now.cash)}`,
             `گنجینه ${formatPoints(now.treasury)}`,
             `بانک خون ${formatPoints(now.bloodBank)}`,
+            ...(d.circulation.pending !== '0'
+              ? [`و ${formatPoints(d.circulation.pending)} درآمد هنوز تسویه‌نشده`]
+              : []),
           ]}
         />
       </div>
       <p className="-mt-3 mb-6 text-xs text-faint">
-        بازیکن فعال: دست‌کم یک «لولو»ی موفق در آن بازه. روزها به وقت تهران.
+        بازیکن فعال: دست‌کم یک «لولو»ی موفق در آن بازه. روزها به وقت تهران. worker حساب‌های
+        بی‌فعالیت را هر ساعت تسویه می‌کند؛ درآمد قبرستان و غذای این فاصله جدا نشان داده می‌شود.
       </p>
 
       <section className="mb-6 rounded-2xl border border-line bg-surface p-4">

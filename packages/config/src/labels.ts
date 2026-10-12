@@ -126,6 +126,12 @@ export const LABEL_RULES: readonly LabelRule[] = [
   suggested('admin.sessionIdleMinutes', 'پایان نشست پنل پس از این مدت بی‌کاری (دقیقه)', 'B-2'),
 
   suggested(
+    'settlement.periodicIntervalMinutes',
+    'فاصلهٔ تسویهٔ دوره‌ای حساب‌های بی‌فعالیت توسط worker (دقیقه)',
+    'B-2',
+  ),
+
+  suggested(
     'monitoring.inflationDailyWarnBp',
     'هشدار تورم: رشد پول در گردش در آخرین روز کامل (bp)',
     'B-2',

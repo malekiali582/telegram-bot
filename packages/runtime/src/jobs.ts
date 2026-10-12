@@ -14,7 +14,10 @@ import type { Logger } from './logger.ts';
 
 export interface JobDefinition {
   name: string;
+  /** Time between runs, unless `nextRunAt` decides. */
   intervalMs: number;
+  /** When to run next, given when this run finished (e.g. from the game configuration). */
+  nextRunAt?(finishedAt: Date): Date | Promise<Date>;
   /** Lease length; must exceed the longest expected run. */
   leaseMs?: number;
   run(): Promise<Record<string, unknown> | void>;
@@ -97,6 +100,17 @@ export class JobScheduler {
       this.log.error('job failed', { job: job.name, error: err });
     }
     const finishedAt = this.now();
+    let nextRunAt = new Date(finishedAt.getTime() + job.intervalMs);
+    if (job.nextRunAt) {
+      try {
+        nextRunAt = await job.nextRunAt(finishedAt);
+      } catch (err) {
+        this.log.error('job schedule failed; using its default interval', {
+          job: job.name,
+          error: err,
+        });
+      }
+    }
     await this.db
       .update(jobRuns)
       .set({ finishedAt, status: error ? 'failed' : 'succeeded', error, stats })
@@ -109,7 +123,7 @@ export class JobScheduler {
         lastFinishedAt: finishedAt,
         lastError: error,
         consecutiveFailures: error ? sql`${jobState.consecutiveFailures} + 1` : 0,
-        nextRunAt: new Date(finishedAt.getTime() + job.intervalMs),
+        nextRunAt,
         updatedAt: finishedAt,
       })
       .where(eq(jobState.name, job.name));

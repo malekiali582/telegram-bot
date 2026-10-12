@@ -17,7 +17,6 @@ export interface WorkerOptions {
   log: Logger;
   /** PostgreSQL URL for LISTEN; without it the sender only polls. */
   listenUrl?: string;
-  settleIntervalMs: number;
   outboxIntervalMs: number;
   /** How often due jobs are checked. */
   tickMs?: number;
@@ -43,7 +42,7 @@ export async function startWorker(options: WorkerOptions): Promise<{ stop(): Pro
 
   const scheduler = new JobScheduler(
     options.ctx.db,
-    workerJobs(options.ctx, { settleIntervalMs: options.settleIntervalMs }),
+    workerJobs(options.ctx),
     log,
     () => options.ctx.clock.now(),
     ownerId,

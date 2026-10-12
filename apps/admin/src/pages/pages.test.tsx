@@ -40,6 +40,7 @@ function dashboard(over: Partial<DashboardView> = {}): DashboardView {
         bloodBank: '50000',
         total: '3395600',
       },
+      pending: '12345',
       // 2026-09-11 … 2026-10-12
       daily: Array.from({ length: 31 }, (_, i) =>
         day(
@@ -162,6 +163,7 @@ describe('dashboard page', () => {
     expect(await screen.findByText('بازیکن فعال امروز')).toBeTruthy();
     expect(screen.getByText('۱۲')).toBeTruthy();
     expect(screen.getByText('۳۳٬۹۵۶')).toBeTruthy();
+    expect(screen.getByText('و ۱۲۳٫۴۵ درآمد هنوز تسویه‌نشده')).toBeTruthy();
     const alert = screen.getByRole('alert');
     expect(alert.textContent).toContain('هشدار تورم');
     expect(alert.textContent).toContain('۲۳٫۸٪');

@@ -170,6 +170,18 @@ export const gameConfigSchema = z
         .min(5)
         .max(24 * 60),
     }),
+    /**
+     * The worker's periodic settlement of idle accounts (cemetery income, food deposits).
+     * Amounts never depend on it; it only decides how often idle balances are brought up
+     * to date. Interest and streak rewards are settled right after each Tehran midnight
+     * regardless, and every player action settles first.
+     */
+    settlement: z.strictObject({
+      periodicIntervalMinutes: z
+        .int()
+        .min(1)
+        .max(24 * 60),
+    }),
     /** Admin-panel dashboard warnings; they never change the game. */
     monitoring: z.strictObject({
       /** Warn when money in circulation grew by at least this much in the last full day… */

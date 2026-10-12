@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import { DEFAULT_GAME_CONFIG } from '@lulu/config';
 import type { DatabaseHandle } from '@lulu/database';
-import { configVersions, queryRows } from '@lulu/database';
+import { configVersions, loadMigrations, queryRows } from '@lulu/database';
 import { openPglite } from '@lulu/database/pglite';
 import type { TestDatabase } from '@lulu/database/testing';
 import { createTestDatabase } from '@lulu/database/testing';
@@ -99,7 +99,7 @@ describe('logical backup', () => {
     );
     expect(header.tables).not.toContain('admin_sessions');
     expect(header.tables).not.toContain('schema_migrations');
-    expect(header.migrations.at(-1)?.version).toBe('0008_panel_monitoring');
+    expect(header.migrations.at(-1)?.version).toBe(loadMigrations().at(-1)?.version);
     expect(backup.rows.ledger_entries).toBeGreaterThan(100);
   });
 

@@ -42,6 +42,7 @@ export const dashboardRoutes: FastifyPluginCallback<{ deps: ApiDeps }> = (app, {
       circulation: {
         now: circulation(o.circulation.now),
         daily: o.circulation.daily.map(circulation),
+        pending: o.circulation.pendingCenti.toString(),
       },
       flows: { today: flow(o.flows.today), week: flow(o.flows.week), month: flow(o.flows.month) },
       inflation: {

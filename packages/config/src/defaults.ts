@@ -182,6 +182,9 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     sessionTtlHours: 12,
     sessionIdleMinutes: 30,
   },
+  settlement: {
+    periodicIntervalMinutes: 60,
+  },
   monitoring: {
     inflationDailyWarnBp: 1_000,
     inflationWeeklyWarnBp: 3_000,

@@ -35,6 +35,7 @@ function oldDefaults(): OldConfig {
   });
   // Before 0008: no monitoring section, two-hour idle timeout.
   delete (c as unknown as Record<string, unknown>).monitoring;
+  delete (c as unknown as Record<string, unknown>).settlement;
   (c as unknown as { admin: { sessionIdleMinutes: number } }).admin.sessionIdleMinutes = 120;
   return c;
 }
@@ -84,6 +85,7 @@ describe('migration 0005 on old data (pglite)', () => {
     // 0008: the monitoring section is added everywhere; only the untouched default gets
     // the 30-minute idle timeout, a version chosen in the panel keeps its own value.
     expect(late.config.monitoring.inflationDailyWarnBp).toBe(1000);
+    expect(late.config.settlement.periodicIntervalMinutes).toBe(60);
     expect(late.config.admin.sessionIdleMinutes).toBe(120);
     expect(early.config.admin.sessionIdleMinutes).toBe(30);
     expect(await ensureDefaultConfig(h.db)).toMatchObject({
