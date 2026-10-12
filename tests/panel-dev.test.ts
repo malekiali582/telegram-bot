@@ -8,13 +8,15 @@ import { queryRows } from '@lulu/database';
 import type { TestDatabase } from '@lulu/database/testing';
 import { createTestDatabase } from '@lulu/database/testing';
 import { createDomainContext, playerProfile } from '@lulu/domain';
-import { createLogger } from '@lulu/runtime';
+import { createLogger, silentLogger } from '@lulu/runtime';
+import { OutboxSender } from '@lulu/worker';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { TelegramGuard } from '../scripts/panel-dev/no-telegram.ts';
 import { blockTelegram, isTelegramHost } from '../scripts/panel-dev/no-telegram.ts';
 import { preparePanelDatabase } from '../scripts/panel-dev/prepare.ts';
 import { SAMPLE_PREFIX, SampleSeedRefused, seedSampleData } from '../scripts/panel-dev/seed.ts';
+import { simulatedAdapter } from '../scripts/panel-dev/simulated-adapter.ts';
 
 /**
  * `npm run dev:panel`: no connection to Telegram (the live bot runs elsewhere with the
@@ -101,8 +103,10 @@ describe('Telegram block in the panel development mode', () => {
     const source = readFileSync(new URL('../scripts/dev-panel.ts', import.meta.url), 'utf8');
     const code = source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
     expect(code).not.toMatch(
-      /loadEnvFile|telegramEnvSchema|@lulu\/bot\/telegram|grammy|@lulu\/worker/,
+      /loadEnvFile|telegramEnvSchema|@lulu\/bot\/telegram|grammy|connectTelegram/,
     );
+    // The worker runs, but only with the simulated adapters.
+    expect(code).toMatch(/adapters: \{ telegram: simulatedAdapter\('telegram'\)/);
     const firstStatement = code
       .split('\n')
       .map((l) => l.trim())
@@ -249,6 +253,34 @@ describe('dev owner account and the API in dev:panel mode', () => {
     const reset = await preparePanelDatabase(t, { sample: SMALL, newPassword: true });
     expect(reset.owner.password).not.toBe(prepared.owner.password);
 
+    expect(guard.blocked.length).toBe(blockedBefore);
+  });
+});
+
+describe('simulated sender in dev:panel', () => {
+  it('delivers queued messages through the real outbox sender without any network', async () => {
+    const blockedBefore = guard.blocked.length;
+    const telegram = simulatedAdapter('telegram');
+    const rubika = simulatedAdapter('rubika');
+    // Two hours later the sample's rate-limited message is due.
+    const ctx = createDomainContext(t.db, {
+      clock: { now: () => new Date(NOW.getTime() + 2 * 3_600_000) },
+    });
+    const sender = new OutboxSender({
+      ctx,
+      adapters: { telegram, rubika },
+      log: silentLogger,
+      limiter: null,
+    });
+    const stats = await sender.drainOnce();
+    expect(stats).toMatchObject({ sent: 1, failed: 0 });
+    expect(telegram.sent + rubika.sent).toBe(1);
+    const sent = await rows<{ status: string; message_id: string }>(
+      sql`SELECT status, result->>'messageId' AS message_id FROM outbox
+          WHERE result->>'messageId' LIKE 'sim-%'`,
+    );
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ status: 'sent' });
     expect(guard.blocked.length).toBe(blockedBefore);
   });
 });

@@ -119,6 +119,13 @@ export const adminBootstrapEnvSchema = z.object({
   ADMIN_BOOTSTRAP_PASSWORD: z.string().min(12, 'must be at least 12 characters'),
 });
 
+/** Logical backups made from the panel or `npm run backup:create` (docs/backup.md). */
+export const backupEnvSchema = z.object({
+  BACKUP_DIR: z.string().min(1).default('backups'),
+  /** Only the newest backups are kept in BACKUP_DIR. */
+  BACKUP_KEEP: z.coerce.number().int().min(1).max(1000).default(10),
+});
+
 export const contentEnvSchema = z.object({
   GHOSTS_INCOMING_PATH: z.string().min(1).default('content/ghosts/incoming.json'),
   ALLOW_DEV_SEED: bool,

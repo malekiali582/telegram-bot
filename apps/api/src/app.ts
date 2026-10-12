@@ -13,7 +13,9 @@ import type { ApiErrorBody, AppInfo, RouteAccess } from './contract.ts';
 import { CSRF_HEADER } from './contract.ts';
 import { ApiError, codeForStatus, errorMessage } from './errors.ts';
 import { authRoutes } from './routes/auth.ts';
+import { dashboardRoutes } from './routes/dashboard.ts';
 import { healthRoutes } from './routes/health.ts';
+import { systemRoutes } from './routes/system.ts';
 import { applySecurityHeaders } from './security.ts';
 
 declare module 'fastify' {
@@ -42,6 +44,8 @@ export interface ApiOptions {
   trustProxy?: boolean | string | number;
   /** Built panel (apps/admin/dist) served on the same origin. */
   staticDir?: string;
+  /** Where the panel writes logical backups, and how many it keeps. */
+  backups?: { dir: string; keep: number };
   app?: AppInfo;
 }
 
@@ -55,6 +59,7 @@ export interface ApiDeps extends Required<Pick<ApiOptions, 'ctx' | 'log' | 'sess
   cookieName: string;
   cookieSecure: boolean;
   app: AppInfo;
+  backups: { dir: string; keep: number } | undefined;
 }
 
 export const sessionCookieName = (secure: boolean) =>
@@ -84,6 +89,7 @@ export async function buildApi(
     cookieName: sessionCookieName(options.cookieSecure),
     cookieSecure: options.cookieSecure,
     app: options.app ?? { mode: 'production' },
+    backups: options.backups,
   };
   const log = options.log;
 
@@ -124,9 +130,13 @@ export async function buildApi(
 
     // 2. A live session.
     const token = request.cookies[deps.cookieName];
-    const session = token
-      ? await findActiveSession(options.ctx.db, token, options.ctx.clock.now())
-      : null;
+    let session = null;
+    if (token) {
+      const now = options.ctx.clock.now();
+      const { config } = await options.ctx.config.effectiveAt(options.ctx.db, now);
+      const idleMs = config.admin.sessionIdleMinutes * 60_000;
+      session = await findActiveSession(options.ctx.db, token, now, idleMs);
+    }
     if (!session) throw new ApiError('unauthenticated');
 
     // 3. The per-session CSRF token on writes.
@@ -226,5 +236,7 @@ export async function buildApi(
 
   await app.register(healthRoutes, { deps });
   await app.register(authRoutes, { deps });
+  await app.register(dashboardRoutes, { deps });
+  await app.register(systemRoutes, { deps });
   return { app, routes };
 }

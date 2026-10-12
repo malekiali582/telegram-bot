@@ -6,15 +6,14 @@ import type { AdminRole } from '../contract.ts';
 
 /**
  * Admin sessions. The random token lives only in the HttpOnly cookie; the database
- * keeps its SHA-256. A session ends after 30 minutes without a request, 12 hours after
- * login, on logout, or when its admin is disabled.
+ * keeps its SHA-256. A session ends after `admin.sessionIdleMinutes` without a request
+ * (30), `admin.sessionTtlHours` after login (12; fixed at login), on logout, or when its
+ * admin is disabled.
  *
  * The CSRF token is derived from the session token with SESSION_SECRET (HMAC), so the
  * panel can fetch it again after a page reload; the database keeps its hash too.
  */
 
-export const SESSION_IDLE_MS = 30 * 60_000;
-export const SESSION_MAX_MS = 12 * 60 * 60_000;
 /** `last_seen_at` is written at most this often, not on every request. */
 const TOUCH_EVERY_MS = 60_000;
 
@@ -44,13 +43,14 @@ export async function createSession(
     adminUserId: number;
     secret: string;
     now: Date;
+    ttlMs: number;
     ip: string;
     userAgent: string | undefined;
   },
 ): Promise<NewSession> {
   const token = randomBytes(32).toString('base64url');
   const csrfToken = csrfTokenFor(input.secret, token);
-  const expiresAt = new Date(input.now.getTime() + SESSION_MAX_MS);
+  const expiresAt = new Date(input.now.getTime() + input.ttlMs);
   await ex.insert(adminSessions).values({
     tokenHash: sha256(token),
     adminUserId: input.adminUserId,
@@ -66,6 +66,8 @@ export async function createSession(
 
 export interface ActiveSession {
   tokenHash: string;
+  /** Inactivity that ends this session, from the configuration in force. */
+  idleMs: number;
   csrfTokenHash: string;
   expiresAt: Date;
   admin: { id: number; username: string; role: AdminRole };
@@ -76,6 +78,7 @@ export async function findActiveSession(
   ex: Executor,
   token: string,
   now: Date,
+  idleMs: number,
 ): Promise<ActiveSession | null> {
   if (token.length < 20 || token.length > 100) return null;
   const tokenHash = sha256(token);
@@ -96,7 +99,7 @@ export async function findActiveSession(
     .where(eq(adminSessions.tokenHash, tokenHash));
   if (!row || row.revokedAt !== null || row.disabledAt !== null) return null;
   const t = now.getTime();
-  if (t >= row.expiresAt.getTime() || t - row.lastSeenAt.getTime() >= SESSION_IDLE_MS) return null;
+  if (t >= row.expiresAt.getTime() || t - row.lastSeenAt.getTime() >= idleMs) return null;
 
   if (t - row.lastSeenAt.getTime() >= TOUCH_EVERY_MS) {
     await ex
@@ -106,6 +109,7 @@ export async function findActiveSession(
   }
   return {
     tokenHash,
+    idleMs,
     csrfTokenHash: row.csrfTokenHash,
     expiresAt: row.expiresAt,
     admin: { id: row.adminId, username: row.username, role: row.role },

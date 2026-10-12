@@ -11,7 +11,7 @@ import {
   webhookServerEnvSchema,
 } from '@lulu/config';
 import { createDomainContext } from '@lulu/domain';
-import { createLogger } from '@lulu/runtime';
+import { createLogger, startHeartbeat } from '@lulu/runtime';
 import { bootstrapDatabase, onShutdown } from './bootstrap.ts';
 import { connectTelegram, makeUpdateHandler, startPolling, startWebhook } from './telegram.ts';
 
@@ -34,6 +34,12 @@ const onUpdate = makeUpdateHandler(
   log,
 );
 
+const heartbeat = await startHeartbeat(handle.db, {
+  service: 'bot',
+  log,
+  details: { mode: tgEnv.TELEGRAM_MODE, platform: 'telegram' },
+});
+
 if (tgEnv.TELEGRAM_MODE === 'webhook') {
   const server = parseEnv(webhookServerEnvSchema);
   const http = await startWebhook(tg, {
@@ -46,6 +52,7 @@ if (tgEnv.TELEGRAM_MODE === 'webhook') {
   });
   onShutdown(async () => {
     await new Promise((resolve) => http.close(resolve));
+    await heartbeat.stop();
     await handle.close();
   }, log);
 } else {
@@ -55,6 +62,7 @@ if (tgEnv.TELEGRAM_MODE === 'webhook') {
   });
   fatal = onShutdown(async () => {
     await polling.stop();
+    await heartbeat.stop();
     await handle.close();
   }, log);
 }

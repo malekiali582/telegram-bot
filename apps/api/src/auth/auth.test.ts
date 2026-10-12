@@ -86,17 +86,18 @@ describe('admin accounts', () => {
       adminUserId: created.adminUserId,
       secret: 's'.repeat(32),
       now,
+      ttlMs: 12 * 3_600_000,
       ip: '127.0.0.1',
       userAgent: undefined,
     });
-    expect(await findActiveSession(game.ctx.db, session.token, now)).not.toBeNull();
+    expect(await findActiveSession(game.ctx.db, session.token, now, 30 * 60_000)).not.toBeNull();
     const reset = await resetAdminPassword(game.ctx.db, {
       adminUserId: created.adminUserId,
       password: 'another long password',
       now,
     });
     expect(reset.status).toBe('ok');
-    expect(await findActiveSession(game.ctx.db, session.token, now)).toBeNull();
+    expect(await findActiveSession(game.ctx.db, session.token, now, 30 * 60_000)).toBeNull();
     const [row] = await game.ctx.db.select().from(adminSessions);
     expect(row?.tokenHash).not.toBe(session.token);
   });

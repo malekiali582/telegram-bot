@@ -30,6 +30,8 @@
     "dev:grant": "node --conditions=@lulu/source --import tsx scripts/dev-grant.ts",
     "dev:doctor": "node --conditions=@lulu/source --import tsx scripts/dev-doctor.ts",
     "admin:bootstrap": "node --conditions=@lulu/source --import tsx scripts/admin-bootstrap.ts",
+    "backup:create": "node --conditions=@lulu/source --import tsx scripts/backup.ts create",
+    "backup:restore": "node --conditions=@lulu/source --import tsx scripts/backup.ts restore",
     "simulate": "node --conditions=@lulu/source --import tsx scripts/simulate.ts"
   },
   "devDependencies": {

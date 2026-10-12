@@ -11,6 +11,9 @@ import { and, eq, sql } from 'drizzle-orm';
 
 export const OUTBOX_CHANNEL = 'lulu_outbox';
 
+/** The `job_state` row whose lease marks the single active outbox sender. */
+export const SENDER_LEASE = 'outbox-sender';
+
 /** Every payload carries `platformChatId` at the top so a group migration can re-address it. */
 export type OutboxItem =
   | { kind: 'send'; payload: OutgoingMessage }

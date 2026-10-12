@@ -2,7 +2,7 @@ import type { Platform } from '@lulu/database';
 import type { DomainContext } from '@lulu/domain';
 import type { PlatformAdapter } from '@lulu/platform';
 import type { Logger } from '@lulu/runtime';
-import { JobScheduler, OUTBOX_CHANNEL, newOwnerId } from '@lulu/runtime';
+import { JobScheduler, OUTBOX_CHANNEL, newOwnerId, startHeartbeat } from '@lulu/runtime';
 import { workerJobs } from './jobs.ts';
 import { listenForNotifications } from './listen.ts';
 import { OutboxSender, startSenderLoop } from './sender.ts';
@@ -23,7 +23,10 @@ export interface WorkerOptions {
   tickMs?: number;
 }
 
-/** Starts the outbox sender and the job scheduler; used by the worker app and dev mode. */
+/**
+ * Starts the outbox sender, the job scheduler and the worker heartbeat; used by the
+ * worker app and both development modes.
+ */
 export async function startWorker(options: WorkerOptions): Promise<{ stop(): Promise<void> }> {
   const ownerId = newOwnerId();
   const log = options.log.child({ component: 'worker' });
@@ -46,6 +49,11 @@ export async function startWorker(options: WorkerOptions): Promise<{ stop(): Pro
     ownerId,
   );
   await scheduler.ensureJobs();
+  const heartbeat = await startHeartbeat(options.ctx.db, {
+    service: 'worker',
+    log,
+    details: { platforms: Object.keys(options.adapters) },
+  });
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
   const tick = async () => {
@@ -66,6 +74,7 @@ export async function startWorker(options: WorkerOptions): Promise<{ stop(): Pro
       if (timer) clearTimeout(timer);
       await listener?.close();
       await senderLoop.stop();
+      await heartbeat.stop();
     },
   };
 }

@@ -35,6 +35,7 @@ describe(`migrations (${testBackend()})`, () => {
       '0005_owner_rules_round2',
       '0006_daily_streaks',
       '0007_sample_markers',
+      '0008_panel_monitoring',
     ]);
     expect(checksum('a\r\nb')).toBe(checksum('a\nb'));
   });
@@ -51,6 +52,7 @@ describe(`migrations (${testBackend()})`, () => {
       '0005_owner_rules_round2',
       '0006_daily_streaks',
       '0007_sample_markers',
+      '0008_panel_monitoring',
     ]);
     expect(await migrateDatabase(t)).toEqual({ applied: [] });
   });

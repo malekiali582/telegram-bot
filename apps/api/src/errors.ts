@@ -8,6 +8,8 @@ const MESSAGES: Record<ApiErrorCode, string> = {
   bad_csrf: 'نشست شما تازه نیست. صفحه را دوباره باز کنید.',
   invalid_request: 'اطلاعات فرستاده‌شده درست نیست.',
   invalid_credentials: 'نام کاربری یا رمز درست نیست.',
+  wrong_password: 'رمز درست نیست.',
+  conflict: 'این کار همین حالا در جریان است. کمی بعد دوباره امتحان کنید.',
   too_many_attempts: 'تلاش‌های ناموفق زیاد بود. کمی بعد دوباره امتحان کنید.',
   not_found: 'پیدا نشد.',
   payload_too_large: 'حجم اطلاعات فرستاده‌شده زیاد است.',
@@ -22,6 +24,9 @@ const STATUS: Record<ApiErrorCode, number> = {
   bad_csrf: 403,
   invalid_request: 400,
   invalid_credentials: 401,
+  // 403, not 401: a mistyped confirmation must not look like a lost session.
+  wrong_password: 403,
+  conflict: 409,
   too_many_attempts: 429,
   not_found: 404,
   payload_too_large: 413,

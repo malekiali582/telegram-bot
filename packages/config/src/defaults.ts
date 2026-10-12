@@ -180,6 +180,11 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     loginMaxAttempts: 5,
     loginWindowMinutes: 15,
     sessionTtlHours: 12,
-    sessionIdleMinutes: 120,
+    sessionIdleMinutes: 30,
+  },
+  monitoring: {
+    inflationDailyWarnBp: 1_000,
+    inflationWeeklyWarnBp: 3_000,
+    inflationMinCirculation: 10_000,
   },
 };

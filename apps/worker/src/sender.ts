@@ -5,6 +5,7 @@ import type { PlatformAdapter, SentMessageRef } from '@lulu/platform';
 import { PlatformSendError } from '@lulu/platform';
 import type { ClaimedMessage, Logger, OnSentHook } from '@lulu/runtime';
 import {
+  SENDER_LEASE,
   SendRateLimiter,
   TELEGRAM_RATE_LIMITS,
   claimDue,
@@ -173,7 +174,7 @@ export class OutboxSender {
   }
 }
 
-export const SENDER_LEASE = 'outbox-sender';
+export { SENDER_LEASE };
 
 /**
  * Keeps one sender active across all processes (job lease), draining on every NOTIFY

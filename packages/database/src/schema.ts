@@ -514,6 +514,20 @@ export const auditLogs = pgTable('audit_logs', {
   createdAt: instant('created_at').notNull().defaultNow(),
 });
 
+/** Liveness of each bot and worker process (migration 0008). */
+export const serviceHeartbeats = pgTable(
+  'service_heartbeats',
+  {
+    service: text('service').$type<'bot' | 'worker'>().notNull(),
+    instance: text('instance').notNull(),
+    startedAt: instant('started_at').notNull(),
+    lastSeenAt: instant('last_seen_at').notNull(),
+    stoppedAt: instant('stopped_at'),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+  },
+  (t) => [primaryKey({ columns: [t.service, t.instance] })],
+);
+
 /** Additional messages showing an encounter (re-posts after a supergroup migration). */
 export const ghostMessageRefs = pgTable(
   'ghost_message_refs',

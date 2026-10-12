@@ -90,8 +90,19 @@ export async function startEmbeddedPostgres(
     authMethod: 'scram-sha-256',
     persistent: options.persistent,
     initdbFlags: ['--encoding=UTF8', '--no-locale'],
-    // Same as production: store and compare instants in UTC.
-    postgresFlags: ['-c', 'timezone=UTC', '-c', 'listen_addresses=127.0.0.1'],
+    postgresFlags: [
+      // Same as production: store and compare instants in UTC.
+      '-c',
+      'timezone=UTC',
+      '-c',
+      'listen_addresses=127.0.0.1',
+      // No separate I/O worker processes (PostgreSQL 18 default `worker`). On Windows
+      // they can outlive a stopped server and keep its shared memory, so the next start
+      // on the same data directory fails with "pre-existing shared memory block is still
+      // in use". Synchronous I/O is plenty for development and tests.
+      '-c',
+      'io_method=sync',
+    ],
     onLog: keep,
     onError: keep,
   });

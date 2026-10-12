@@ -11,10 +11,13 @@
  *      («[نمونه]», both platforms, 45 days of real ledger history);
  *   4. a local owner account whose password is printed here (first run, or with
  *      `npm run dev:panel -- --new-password`);
- *   5. the API, and the panel with hot reload on http://localhost:5173.
+ *   5. the API, and the panel with hot reload on http://localhost:5173;
+ *   6. the real worker (jobs, heartbeat, outbox) with a SIMULATED sender: messages are
+ *      marked sent with a `sim-` id and nothing leaves the machine.
  *
- * No worker runs: nothing is ever sent. Ports can be changed with PANEL_DEV_DB_PORT,
- * PANEL_DEV_API_PORT and PANEL_DEV_PORT in the shell (not in .env).
+ * Logical backups from the System page go to `.lulu-panel-dev/backups`. Ports can be changed with PANEL_DEV_DB_PORT,
+ * PANEL_DEV_API_PORT and PANEL_DEV_PORT in the shell (not in .env); PANEL_DEV_DIR runs a
+ * second, separate instance from another folder.
  * Delete `.lulu-panel-dev/` to start again from fresh sample data.
  */
 import { randomBytes } from 'node:crypto';
@@ -27,11 +30,13 @@ import { connectPostgres } from '@lulu/database';
 import { EmbeddedPostgresStartError, startEmbeddedPostgres } from '@lulu/database/embedded';
 import { createDomainContext } from '@lulu/domain';
 import { createLogger } from '@lulu/runtime';
+import { startWorker } from '@lulu/worker';
 import pg from 'pg';
 import { createServer as createViteServer } from 'vite';
 import { blockTelegram } from './panel-dev/no-telegram.ts';
 import { preparePanelDatabase } from './panel-dev/prepare.ts';
 import { FULL_SAMPLE, SampleSeedRefused } from './panel-dev/seed.ts';
+import { simulatedAdapter } from './panel-dev/simulated-adapter.ts';
 
 const telegram = blockTelegram((host) => {
   process.stderr.write(`⛔ اتصال به تلگرام (${host}) در حالت توسعهٔ پنل مسدود شد.\n`);
@@ -41,7 +46,7 @@ for (const key of Object.keys(process.env)) {
   if (key.startsWith('TELEGRAM_')) delete process.env[key];
 }
 
-const DEV_DIR = '.lulu-panel-dev';
+const DEV_DIR = process.env.PANEL_DEV_DIR || '.lulu-panel-dev';
 const DATABASE = 'lulu_panel_dev';
 const port = (name: string, fallback: number) => {
   const value = Number(process.env[name] ?? fallback);
@@ -168,6 +173,7 @@ const { app } = await buildApi({
   sessionSecret: secrets.sessionSecret,
   cookieSecure: false, // plain HTTP on this computer only
   app: { mode: 'dev-panel' },
+  backups: { dir: resolve(DEV_DIR, 'backups'), keep: 10 },
 });
 await app
   .listen({ host: '127.0.0.1', port: PORTS.api })
@@ -194,6 +200,18 @@ await vite
   );
 cleanups.push(() => vite.close());
 
+// ── 5. worker with a simulated sender ──
+const ctx = createDomainContext(handle.db);
+const worker = await startWorker({
+  ctx,
+  adapters: { telegram: simulatedAdapter('telegram'), rubika: simulatedAdapter('rubika') },
+  log,
+  listenUrl: postgres.urlFor(DATABASE),
+  settleIntervalMs: 60_000,
+  outboxIntervalMs: 1_000,
+}).catch((err: unknown) => fail(`worker شبیه‌سازی‌شده روشن نشد: ${String(err)}`));
+cleanups.push(() => worker.stop());
+
 const seedLine =
   prepared.seed.status === 'seeded'
     ? `   دادهٔ نمونه ساخته شد: ${prepared.seed.players} بازیکن، ${prepared.seed.groups} گروه، ${prepared.seed.transactions} تراکنش (همه با برچسب «[نمونه]»).`
@@ -212,10 +230,11 @@ await say(
   [
     '',
     `✅ پنل مدیریت (حالت توسعه) روشن است: http://localhost:${PORTS.panel}`,
-    `   دیتابیس جدا: ${join(process.cwd(), DEV_DIR)} — پورت ${PORTS.db} (به .lulu-dev ربات دست نمی‌زند)`,
+    `   دیتابیس جدا: ${resolve(DEV_DIR)} — پورت ${PORTS.db} (به .lulu-dev ربات دست نمی‌زند)`,
     seedLine,
     ...passwordLines,
-    `   تلگرام: هیچ اتصالی برقرار نمی‌شود (${telegram.blocked.length} تلاش مسدود شد). worker و ارسال پیام خاموش است.`,
+    `   تلگرام: هیچ اتصالی برقرار نمی‌شود (${telegram.blocked.length} تلاش مسدود شد).`,
+    '   worker روشن است و کارهای زمان‌بندی‌شده را اجرا می‌کند، ولی ارسال پیام شبیه‌سازی‌شده است.',
     '   برای خاموش کردن: Ctrl + C',
     '',
   ].join('\n'),

@@ -170,6 +170,15 @@ export const gameConfigSchema = z
         .min(5)
         .max(24 * 60),
     }),
+    /** Admin-panel dashboard warnings; they never change the game. */
+    monitoring: z.strictObject({
+      /** Warn when money in circulation grew by at least this much in the last full day… */
+      inflationDailyWarnBp: bp,
+      /** …or over the last 7 full days. */
+      inflationWeeklyWarnBp: bp,
+      /** Below this much money in circulation (points), growth rates are not judged. */
+      inflationMinCirculation: points,
+    }),
   })
   .superRefine((c, ctx) => {
     const issue = (path: (string | number)[], message: string) =>

@@ -19,6 +19,10 @@
   --color-warn-soft: #362d1b;
   --color-ok: #7ad69a;
 
+  /* Chart series, validated on the surface (dataviz validator, dark mode: CVD ΔE 26). */
+  --color-series-1: #9085e9;
+  --color-series-2: #d95926;
+
   --font-sans: Vazirmatn, 'Segoe UI', Tahoma, 'Noto Sans Arabic', system-ui, sans-serif;
 }
 

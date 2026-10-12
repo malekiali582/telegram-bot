@@ -27,7 +27,7 @@ import {
   importGhostBatch,
   tehranDate,
 } from '@lulu/domain';
-import { createLogger } from '@lulu/runtime';
+import { createLogger, startHeartbeat } from '@lulu/runtime';
 import { startWorker } from '@lulu/worker';
 import pg from 'pg';
 import { redactProxy, telegramNetworkHints } from './dev-network.ts';
@@ -312,6 +312,12 @@ await step(
       },
     );
     cleanups.push(() => polling.stop());
+    const heartbeat = await startHeartbeat(ctx.db, {
+      service: 'bot',
+      log,
+      details: { mode: 'polling', platform: 'telegram', dev: true },
+    });
+    cleanups.push(() => heartbeat.stop());
     return polling;
   },
   async (err, timedOut) =>

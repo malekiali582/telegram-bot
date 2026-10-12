@@ -116,7 +116,30 @@ export const LABEL_RULES: readonly LabelRule[] = [
   ),
 
   suggested('confirmations.ttlSeconds', 'مهلت دکمه‌های تأیید (ثانیه)', 'B-2'),
-  suggested('admin.*', 'تنظیمات ورود و نشست پنل', 'B-2'),
+  suggested(
+    'admin.loginMaxAttempts',
+    'تلاش ناموفق مجاز ورود به پنل در هر بازه، برای هر نام کاربری و هر IP',
+    'B-2',
+  ),
+  suggested('admin.loginWindowMinutes', 'بازهٔ شمارش تلاش‌های ناموفق ورود (دقیقه)', 'B-2'),
+  suggested('admin.sessionTtlHours', 'عمر مطلق نشست پنل (ساعت)', 'B-2'),
+  suggested('admin.sessionIdleMinutes', 'پایان نشست پنل پس از این مدت بی‌کاری (دقیقه)', 'B-2'),
+
+  suggested(
+    'monitoring.inflationDailyWarnBp',
+    'هشدار تورم: رشد پول در گردش در آخرین روز کامل (bp)',
+    'B-2',
+  ),
+  suggested(
+    'monitoring.inflationWeeklyWarnBp',
+    'هشدار تورم: رشد پول در گردش در ۷ روز کامل گذشته (bp)',
+    'B-2',
+  ),
+  suggested(
+    'monitoring.inflationMinCirculation',
+    'هشدار تورم: کمترین پول در گردش برای سنجیدن رشد (پوینت)',
+    'B-2',
+  ),
 ];
 
 export interface ConfigLeaf {

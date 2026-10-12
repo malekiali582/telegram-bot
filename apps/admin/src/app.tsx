@@ -6,9 +6,19 @@ import { RouterProvider } from 'react-router/dom';
 import { Layout } from './components/layout.tsx';
 import { ErrorState, Loading } from './components/states.tsx';
 import { loggedOutReason, useSession } from './lib/session.ts';
+import type { NavItem } from './nav.ts';
 import { navFor } from './nav.ts';
+import { DashboardPage } from './pages/dashboard.tsx';
 import { LoginPage } from './pages/login.tsx';
 import { ComingSoon, NotFound } from './pages/placeholder.tsx';
+import { SystemPage } from './pages/system.tsx';
+
+/** Pages built so far; the rest show which build section delivers them. */
+function pageFor(item: NavItem, session: SessionView) {
+  if (item.path === '/') return <DashboardPage />;
+  if (item.path === '/system') return <SystemPage session={session} />;
+  return <ComingSoon item={item} />;
+}
 
 export function routesFor(session: SessionView): RouteObject[] {
   return [
@@ -18,7 +28,7 @@ export function routesFor(session: SessionView): RouteObject[] {
       children: [
         ...navFor(session.user.role).map((item) => ({
           ...(item.path === '/' ? { index: true } : { path: item.path.slice(1) }),
-          element: <ComingSoon item={item} />,
+          element: pageFor(item, session),
         })),
         { path: '*', element: <NotFound /> },
       ],

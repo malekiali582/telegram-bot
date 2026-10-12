@@ -1,3 +1,4 @@
+import type { GameConfig } from '@lulu/config';
 import type { Database, Executor } from '@lulu/database';
 import { adminLoginAttempts, adminUsers, auditLogs, inTransaction } from '@lulu/database';
 import { lockKey } from '@lulu/domain';
@@ -9,28 +10,42 @@ import type { NewSession } from './sessions.ts';
 import { createSession, pruneSessions } from './sessions.ts';
 
 /**
- * Login with attempt limits kept in PostgreSQL (no Redis). Failures count per username
- * and per IP since the last success, within the last hour. Past a free allowance each
- * further failure doubles the wait (30 s, 1 min, 2 min … up to 15 min). While a wait is
- * running the password is not even checked, and the attempt is not recorded, so a
- * locked-out attacker cannot extend or probe anything.
+ * Login with attempt limits kept in PostgreSQL (no Redis), set by the `admin.*`
+ * configuration (suggested values, docs/assumptions.md). Failures count per username
+ * and per IP since the last success, within the window. Past the allowed failures each
+ * further one doubles the wait (30 s, 1 min, 2 min … up to the window length). While a
+ * wait is running the password is not even checked and the attempt is not recorded, so
+ * a locked-out attacker can neither extend nor probe anything.
  *
  * Attempts for one username are serialized by an advisory lock, so parallel guesses
- * cannot slip past the limit.
+ * cannot slip past the limit. Re-entering the password for a sensitive action counts
+ * the same way, so it is no side door for guessing.
  */
 
-export const LOGIN_LIMITS = {
-  windowMs: 60 * 60_000,
-  freeFailuresPerUsername: 5,
-  freeFailuresPerIp: 20,
-  baseDelayMs: 30_000,
-  maxDelayMs: 15 * 60_000,
-} as const;
+export interface LoginPolicy {
+  windowMs: number;
+  /** Failures allowed per username and per IP within the window before waits start. */
+  freeFailures: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  sessionTtlMs: number;
+}
 
-export function lockoutMs(failures: number, freeFailures: number): number {
-  if (failures < freeFailures) return 0;
-  const doublings = Math.min(failures - freeFailures, 20);
-  return Math.min(LOGIN_LIMITS.maxDelayMs, LOGIN_LIMITS.baseDelayMs * 2 ** doublings);
+export function loginPolicy(config: GameConfig): LoginPolicy {
+  const windowMs = config.admin.loginWindowMinutes * 60_000;
+  return {
+    windowMs,
+    freeFailures: config.admin.loginMaxAttempts,
+    baseDelayMs: 30_000,
+    maxDelayMs: Math.max(30_000, windowMs),
+    sessionTtlMs: config.admin.sessionTtlHours * 3_600_000,
+  };
+}
+
+export function lockoutMs(failures: number, policy: LoginPolicy): number {
+  if (failures < policy.freeFailures) return 0;
+  const doublings = Math.min(failures - policy.freeFailures, 20);
+  return Math.min(policy.maxDelayMs, policy.baseDelayMs * 2 ** doublings);
 }
 
 async function failuresSinceSuccess(
@@ -38,10 +53,12 @@ async function failuresSinceSuccess(
   column: typeof adminLoginAttempts.username | typeof adminLoginAttempts.ip,
   value: string,
   now: Date,
+  windowMs: number,
 ): Promise<{ failures: number; lastFailureAt: Date | null }> {
-  const since = new Date(now.getTime() - LOGIN_LIMITS.windowMs);
+  const since = new Date(now.getTime() - windowMs);
+  // "After the last success" by insertion order, not time: equal timestamps are possible.
   const [lastSuccess] = await ex
-    .select({ at: adminLoginAttempts.attemptedAt })
+    .select({ id: adminLoginAttempts.id })
     .from(adminLoginAttempts)
     .where(
       and(
@@ -50,9 +67,8 @@ async function failuresSinceSuccess(
         gt(adminLoginAttempts.attemptedAt, since),
       ),
     )
-    .orderBy(desc(adminLoginAttempts.attemptedAt))
+    .orderBy(desc(adminLoginAttempts.id))
     .limit(1);
-  const from = lastSuccess?.at ?? since;
   const [row] = await ex
     .select({
       failures: sql<number>`count(*)::int`,
@@ -63,7 +79,8 @@ async function failuresSinceSuccess(
       and(
         eq(column, value),
         eq(adminLoginAttempts.succeeded, false),
-        gt(adminLoginAttempts.attemptedAt, from),
+        gt(adminLoginAttempts.attemptedAt, since),
+        lastSuccess ? gt(adminLoginAttempts.id, lastSuccess.id) : undefined,
       ),
     );
   return {
@@ -78,19 +95,55 @@ export async function loginWaitMs(
   username: string,
   ip: string,
   now: Date,
+  policy: LoginPolicy,
 ): Promise<number> {
-  const checks = [
-    [adminLoginAttempts.username, username, LOGIN_LIMITS.freeFailuresPerUsername],
-    [adminLoginAttempts.ip, ip, LOGIN_LIMITS.freeFailuresPerIp],
-  ] as const;
   let wait = 0;
-  for (const [column, value, free] of checks) {
-    const { failures, lastFailureAt } = await failuresSinceSuccess(ex, column, value, now);
+  for (const [column, value] of [
+    [adminLoginAttempts.username, username],
+    [adminLoginAttempts.ip, ip],
+  ] as const) {
+    const { failures, lastFailureAt } = await failuresSinceSuccess(
+      ex,
+      column,
+      value,
+      now,
+      policy.windowMs,
+    );
     if (!lastFailureAt) continue;
-    const until = lastFailureAt.getTime() + lockoutMs(failures, free);
+    const until = lastFailureAt.getTime() + lockoutMs(failures, policy);
     wait = Math.max(wait, until - now.getTime());
   }
   return wait;
+}
+
+interface AttemptInput {
+  username: string;
+  password: string;
+  ip: string;
+  now: Date;
+  policy: LoginPolicy;
+}
+
+type AttemptResult =
+  | { status: 'ok'; admin: typeof adminUsers.$inferSelect }
+  | { status: 'invalid_credentials' }
+  | { status: 'locked'; retryAfterMs: number };
+
+/** One limited, recorded password check inside the caller's transaction. */
+async function attempt(ex: Executor, input: AttemptInput): Promise<AttemptResult> {
+  const { username } = input;
+  const retryAfterMs = await loginWaitMs(ex, username, input.ip, input.now, input.policy);
+  if (retryAfterMs > 0) return { status: 'locked', retryAfterMs };
+
+  const [admin] = await ex.select().from(adminUsers).where(eq(adminUsers.username, username));
+  const passwordOk =
+    input.password.length <= PASSWORD_MAX_LENGTH &&
+    (await verifyPassword(input.password, admin?.passwordHash ?? (await dummyPasswordHash())));
+  const ok = admin !== undefined && admin.disabledAt === null && passwordOk;
+  await ex
+    .insert(adminLoginAttempts)
+    .values({ username, ip: input.ip, attemptedAt: input.now, succeeded: ok });
+  return ok && admin ? { status: 'ok', admin } : { status: 'invalid_credentials' };
 }
 
 export type LoginResult =
@@ -112,6 +165,7 @@ export async function login(
     now: Date;
     secret: string;
     requestId: string;
+    policy: LoginPolicy;
   },
 ): Promise<LoginResult> {
   // Stored lower-case and bounded, so a huge or odd username cannot bloat the table.
@@ -120,24 +174,15 @@ export async function login(
 
   return inTransaction(db, async (tx) => {
     await lockKey(tx, `admin-login:${username}`);
-    const retryAfterMs = await loginWaitMs(tx, username, input.ip, now);
-    if (retryAfterMs > 0) return { status: 'locked' as const, retryAfterMs };
-
-    const [admin] = await tx.select().from(adminUsers).where(eq(adminUsers.username, username));
-    const passwordOk =
-      input.password.length <= PASSWORD_MAX_LENGTH &&
-      (await verifyPassword(input.password, admin?.passwordHash ?? (await dummyPasswordHash())));
-    const ok = admin !== undefined && admin.disabledAt === null && passwordOk;
-
-    await tx
-      .insert(adminLoginAttempts)
-      .values({ username, ip: input.ip, attemptedAt: now, succeeded: ok });
-    if (!ok || !admin) return { status: 'invalid_credentials' as const };
+    const result = await attempt(tx, { ...input, username });
+    if (result.status !== 'ok') return result;
+    const { admin } = result;
 
     const session = await createSession(tx, {
       adminUserId: admin.id,
       secret: input.secret,
       now,
+      ttlMs: input.policy.sessionTtlMs,
       ip: input.ip,
       userAgent: input.userAgent,
     });
@@ -160,5 +205,24 @@ export async function login(
       session,
       admin: { id: admin.id, username: admin.username, role: admin.role },
     };
+  });
+}
+
+/**
+ * «Enter your password again» before a sensitive action (backups, managing admins,
+ * changing owner rules). Limited and recorded exactly like a login.
+ */
+export async function confirmPassword(
+  db: Database,
+  input: { username: string; password: string; ip: string; now: Date; policy: LoginPolicy },
+): Promise<
+  { status: 'ok' } | { status: 'wrong_password' } | { status: 'locked'; retryAfterMs: number }
+> {
+  return inTransaction(db, async (tx) => {
+    await lockKey(tx, `admin-login:${input.username}`);
+    const result = await attempt(tx, input);
+    if (result.status === 'ok') return { status: 'ok' as const };
+    if (result.status === 'locked') return result;
+    return { status: 'wrong_password' as const };
   });
 }

@@ -2,15 +2,9 @@ import { auditLogs } from '@lulu/database';
 import type { FastifyPluginCallback, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { ApiDeps } from '../app.ts';
-import { login } from '../auth/login.ts';
+import { login, loginPolicy } from '../auth/login.ts';
 import { PASSWORD_MAX_LENGTH } from '../auth/password.ts';
-import {
-  SESSION_IDLE_MS,
-  SESSION_MAX_MS,
-  csrfTokenFor,
-  revokeSession,
-  sha256,
-} from '../auth/sessions.ts';
+import { csrfTokenFor, revokeSession, sha256 } from '../auth/sessions.ts';
 import type { AdminUserView, SessionView } from '../contract.ts';
 import { ApiError, parseInput } from '../errors.ts';
 
@@ -35,10 +29,15 @@ export function waitText(ms: number): string {
 export const authRoutes: FastifyPluginCallback<{ deps: ApiDeps }> = (app, { deps }, done) => {
   const { ctx } = deps;
 
-  const sessionView = (user: AdminUserView, token: string, expiresAt: Date): SessionView => ({
+  const sessionView = (
+    user: AdminUserView,
+    token: string,
+    expiresAt: Date,
+    idleMs: number,
+  ): SessionView => ({
     user,
     csrfToken: csrfTokenFor(deps.sessionSecret, token),
-    idleTimeoutSeconds: SESSION_IDLE_MS / 1000,
+    idleTimeoutSeconds: idleMs / 1000,
     expiresAt: expiresAt.toISOString(),
     app: deps.app,
   });
@@ -54,6 +53,8 @@ export const authRoutes: FastifyPluginCallback<{ deps: ApiDeps }> = (app, { deps
   app.post('/api/auth/login', { config: { access: 'public' } }, async (request, reply) => {
     const body = parseInput(loginBody, request.body);
     const now = ctx.clock.now();
+    const { config } = await ctx.config.effectiveAt(ctx.db, now);
+    const policy = loginPolicy(config);
 
     // Logging in again replaces the session this browser had.
     const previous = request.cookies[deps.cookieName];
@@ -67,6 +68,7 @@ export const authRoutes: FastifyPluginCallback<{ deps: ApiDeps }> = (app, { deps
       now,
       secret: deps.sessionSecret,
       requestId: request.id,
+      policy,
     });
     if (result.status === 'locked') {
       throw new ApiError('too_many_attempts', {
@@ -81,15 +83,25 @@ export const authRoutes: FastifyPluginCallback<{ deps: ApiDeps }> = (app, { deps
       httpOnly: true,
       secure: deps.cookieSecure,
       sameSite: 'strict',
-      maxAge: SESSION_MAX_MS / 1000,
+      maxAge: Math.floor(policy.sessionTtlMs / 1000),
     });
-    return sessionView(result.admin, result.session.token, result.session.expiresAt);
+    return sessionView(
+      result.admin,
+      result.session.token,
+      result.session.expiresAt,
+      config.admin.sessionIdleMinutes * 60_000,
+    );
   });
 
   app.get('/api/auth/session', { config: { access: 'admin' } }, (request, reply) => {
     const session = request.session!;
     return reply.send(
-      sessionView(session.admin, request.cookies[deps.cookieName]!, session.expiresAt),
+      sessionView(
+        session.admin,
+        request.cookies[deps.cookieName]!,
+        session.expiresAt,
+        session.idleMs,
+      ),
     );
   });
 

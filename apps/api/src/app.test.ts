@@ -7,8 +7,9 @@ import type { TestGame } from '@lulu/domain/testing';
 import { createTestGame } from '@lulu/domain/testing';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { LOGIN_LIMITS, lockoutMs } from './auth/login.ts';
-import { SESSION_IDLE_MS, SESSION_MAX_MS } from './auth/sessions.ts';
+import { DEFAULT_GAME_CONFIG, parseGameConfig } from '@lulu/config';
+import { configVersions } from '@lulu/database';
+import { lockoutMs, loginPolicy } from './auth/login.ts';
 import type { ApiErrorBody, SessionView } from './contract.ts';
 import { CONTENT_SECURITY_POLICY } from './security.ts';
 import type { TestApi } from './testing.ts';
@@ -16,6 +17,12 @@ import { TEST_ORIGIN, addAdmin, createTestApi, loginAs } from './testing.ts';
 
 let game: TestGame;
 let api: TestApi;
+
+// The code defaults (suggested values in docs/assumptions.md): 5 failures / 15 min,
+// sessions of 12 h with a 30-minute idle timeout.
+const POLICY = loginPolicy(DEFAULT_GAME_CONFIG);
+const SESSION_IDLE_MS = DEFAULT_GAME_CONFIG.admin.sessionIdleMinutes * 60_000;
+const SESSION_MAX_MS = DEFAULT_GAME_CONFIG.admin.sessionTtlHours * 3_600_000;
 
 beforeEach(async () => {
   game = await createTestGame();
@@ -221,16 +228,17 @@ describe('login', () => {
 });
 
 describe('login attempt limit', () => {
-  it('doubles the wait after the free failures, up to 15 minutes', () => {
-    expect(lockoutMs(4, 5)).toBe(0);
-    expect(lockoutMs(5, 5)).toBe(30_000);
-    expect(lockoutMs(6, 5)).toBe(60_000);
-    expect(lockoutMs(8, 5)).toBe(240_000);
-    expect(lockoutMs(50, 5)).toBe(15 * 60_000);
+  it('doubles the wait after the allowed failures, up to the window length', () => {
+    expect(POLICY).toMatchObject({ freeFailures: 5, windowMs: 15 * 60_000 });
+    expect(lockoutMs(4, POLICY)).toBe(0);
+    expect(lockoutMs(5, POLICY)).toBe(30_000);
+    expect(lockoutMs(6, POLICY)).toBe(60_000);
+    expect(lockoutMs(8, POLICY)).toBe(240_000);
+    expect(lockoutMs(50, POLICY)).toBe(15 * 60_000);
   });
 
   it('locks a username after 5 failures, even for the right password, then lets it in', async () => {
-    for (let i = 0; i < LOGIN_LIMITS.freeFailuresPerUsername; i++) {
+    for (let i = 0; i < POLICY.freeFailures; i++) {
       expect((await login('owner', `wrong ${i}`)).statusCode).toBe(401);
     }
     const locked = await login('owner', 'correct horse battery');
@@ -260,7 +268,7 @@ describe('login attempt limit', () => {
   });
 
   it('also limits one IP spraying many usernames', async () => {
-    for (let i = 0; i < LOGIN_LIMITS.freeFailuresPerIp; i++) {
+    for (let i = 0; i < POLICY.freeFailures; i++) {
       await login(`user${i}`, 'wrong');
     }
     expect((await login('owner', 'correct horse battery')).statusCode).toBe(429);
@@ -364,6 +372,21 @@ describe('sessions', () => {
       expect(await sessionStatus(owner.cookie)).toBe(200);
     }
     game.clock.advance(20 * 60_000);
+    expect(await sessionStatus(owner.cookie)).toBe(401);
+  });
+
+  it('follow the idle timeout of the configuration in force', async () => {
+    const owner = await loginAs(api, 'owner');
+    const config = parseGameConfig(structuredClone(DEFAULT_GAME_CONFIG));
+    config.admin.sessionIdleMinutes = 5;
+    await game.ctx.db.insert(configVersions).values({
+      config,
+      source: 'panel',
+      effectiveFrom: game.clock.now(),
+    });
+    game.clock.advance(4 * 60_000);
+    expect(await sessionStatus(owner.cookie)).toBe(200);
+    game.clock.advance(6 * 60_000);
     expect(await sessionStatus(owner.cookie)).toBe(401);
   });
 
