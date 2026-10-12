@@ -9,6 +9,7 @@ import {
   formatNumber,
   formatPoints,
   formatRelative,
+  formatSignedPoints,
 } from './format.ts';
 
 describe('Persian formatting', () => {
@@ -50,5 +51,15 @@ describe('points, percentages and relative time', () => {
     expect(formatRelative('2026-10-12T12:00:20Z', now)).toBe('همین حالا');
     expect(formatRelative('2026-10-12T14:00:00Z', now)).toBe('۲ ساعت دیگر');
     expect(formatRelative('2026-10-09T12:00:00Z', now)).toBe('۳ روز پیش');
+  });
+});
+
+describe('signed amounts', () => {
+  it('keep their sign on the left inside Persian text', () => {
+    const isolate = (s: string) =>
+      `${String.fromCodePoint(0x2066)}${s}${String.fromCodePoint(0x2069)}`;
+    expect(formatSignedPoints('1250')).toBe(isolate('+۱۲٫۵۰'));
+    expect(formatSignedPoints('-30000')).toBe(isolate('−۳۰۰'));
+    expect(formatSignedPoints('0')).toBe(isolate('۰'));
   });
 });

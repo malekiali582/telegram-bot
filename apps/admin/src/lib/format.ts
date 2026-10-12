@@ -122,3 +122,14 @@ export function formatBytes(bytes: number): string {
   }
   return `${new Intl.NumberFormat('fa-IR', { maximumFractionDigits: 1 }).format(value)} ${units[unit]}`;
 }
+
+// Left-to-right isolate: keeps a sign on the left of its number inside Persian text.
+const LRI = String.fromCodePoint(0x2066);
+const PDI = String.fromCodePoint(0x2069);
+
+/** «+۱۲٫۵» / «−۳۰۰» that stays readable inside right-to-left text. */
+export function formatSignedPoints(centi: string | bigint): string {
+  const value = typeof centi === 'bigint' ? centi : BigInt(centi);
+  const text = formatPoints(value);
+  return `${LRI}${value > 0n ? `+${text}` : text}${PDI}`;
+}

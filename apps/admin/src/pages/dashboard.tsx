@@ -13,6 +13,7 @@ import {
   formatDayLong,
   formatNumber,
   formatPoints,
+  formatSignedPoints,
   formatRelative,
   pointsNumber,
 } from '../lib/format.ts';
@@ -104,9 +105,10 @@ function FlowCharts({ flow }: { flow: FlowView }) {
         </section>
       </div>
       <p className="mt-3 text-sm text-muted">
-        اصلاح مدیر: <span className="text-ink">{formatPoints(flow.adjustments)}</span>
+        اصلاح مدیر: <span className="text-ink">{formatSignedPoints(flow.adjustments)}</span>
         {' · '}
-        تغییر خالص پول در گردش: <span className="font-bold text-ink">{formatPoints(flow.net)}</span>
+        تغییر خالص پول در گردش:{' '}
+        <span className="font-bold text-ink">{formatSignedPoints(flow.net)}</span>
       </p>
     </>
   );

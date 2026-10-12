@@ -212,3 +212,148 @@ export interface BackupCreatedView extends BackupView {
 export interface PasswordConfirmation {
   password: string;
 }
+
+// ───────────────────────── players and transactions (8.3) ─────────────────────────
+
+export type PlatformName = 'telegram' | 'rubika';
+
+export interface PlayerListItemView {
+  id: number;
+  /** Untrusted display text. */
+  displayName: string;
+  username: string | null;
+  isSample: boolean;
+  bannedAt: Instant | null;
+  createdAt: Instant;
+  level: number;
+  levelName: string;
+  cash: Centi;
+  treasury: Centi;
+  identities: { platform: PlatformName; platformUserId: string }[];
+  lastActiveAt: Instant | null;
+}
+
+export interface PlayerListView {
+  items: PlayerListItemView[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface NamedKind {
+  kind: string;
+  /** Persian. */
+  name: string;
+}
+
+export interface PlayerDetailView {
+  user: {
+    id: number;
+    displayName: string;
+    username: string | null;
+    isSample: boolean;
+    createdAt: Instant;
+    bannedAt: Instant | null;
+    banReason: string | null;
+  };
+  identities: { platform: PlatformName; platformUserId: string; createdAt: Instant }[];
+  level: number;
+  levelName: string;
+  maxLevel: number;
+  nextLevelCost: Centi | null;
+  cash: Centi;
+  treasury: Centi;
+  tools: { owned: NamedKind[]; equipped: NamedKind | null };
+  inventory: (NamedKind & { count: number })[];
+  meals: {
+    active: (NamedKind & { expiresAt: Instant; deposit: Centi; depositsLeft: number })[];
+    capacity: number;
+  };
+  cemetery: { level: number; hourlyIncome: Centi } | null;
+  waits: { kind: string; until: Instant }[];
+  ghostsToday: { found: number; limit: number };
+  groups: {
+    groupId: number;
+    title: string;
+    platform: PlatformName | null;
+    botPresent: boolean;
+    status: 'member' | 'left';
+    joinedAt: Instant;
+    lastSuccessAt: Instant | null;
+    streak: number;
+  }[];
+  ghosts: {
+    foundTotal: number;
+    heardTotal: number;
+    recent: {
+      id: number;
+      groupId: number;
+      groupTitle: string;
+      foundAt: Instant;
+      heardAt: Instant | null;
+      expiresAt: Instant;
+      text: string;
+    }[];
+  };
+  streakRewards: {
+    date: string;
+    groupId: number;
+    groupTitle: string;
+    streak: number;
+    activeMembers: number;
+    personal: Centi;
+    group: Centi;
+  }[];
+}
+
+export interface TransactionView {
+  id: number;
+  kind: string;
+  kindName: string;
+  effectiveAt: Instant;
+  recordedAt: Instant;
+  user: { id: number; displayName: string } | null;
+  group: { id: number; title: string } | null;
+  admin: { id: number; username: string } | null;
+  reason: string | null;
+  /** Money moved: the sum of the positive entries. */
+  amount: Centi;
+  /** With a player filter: that player's net change. */
+  playerDelta: Centi | null;
+  entries: {
+    account: 'cash' | 'treasury' | 'blood_bank' | 'system';
+    userId: number | null;
+    groupId: number | null;
+    systemCode: string | null;
+    amount: Centi;
+  }[];
+}
+
+export interface TransactionListView {
+  items: TransactionView[];
+  /** Opaque; pass back as `cursor` for the next (older) page. */
+  next: string | null;
+  /** Only on the first page. */
+  summary: { count: number; amount: Centi } | null;
+}
+
+export interface AdjustBalanceRequest {
+  wallet: 'cash' | 'treasury';
+  /** Points with up to two decimals, negative to take away, e.g. "-12.5". */
+  amount: string;
+  reason: string;
+  /** Random per form submission: a repeated submit changes nothing. */
+  idempotencyKey: string;
+}
+
+export interface AdjustBalanceResult {
+  transactionId: number | null;
+  /** The wallet's new balance; null for a repeated submission (nothing changed). */
+  balance: Centi | null;
+  duplicate: boolean;
+}
+
+export interface BanRequest {
+  banned: boolean;
+  reason: string;
+}

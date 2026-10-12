@@ -9,14 +9,19 @@ import { loggedOutReason, useSession } from './lib/session.ts';
 import type { NavItem } from './nav.ts';
 import { navFor } from './nav.ts';
 import { DashboardPage } from './pages/dashboard.tsx';
+import { PlayerPage } from './pages/player.tsx';
+import { PlayersPage } from './pages/players.tsx';
 import { LoginPage } from './pages/login.tsx';
 import { ComingSoon, NotFound } from './pages/placeholder.tsx';
 import { SystemPage } from './pages/system.tsx';
+import { TransactionsPage } from './pages/transactions.tsx';
 
 /** Pages built so far; the rest show which build section delivers them. */
 function pageFor(item: NavItem, session: SessionView) {
   if (item.path === '/') return <DashboardPage />;
   if (item.path === '/system') return <SystemPage session={session} />;
+  if (item.path === '/players') return <PlayersPage />;
+  if (item.path === '/transactions') return <TransactionsPage />;
   return <ComingSoon item={item} />;
 }
 
@@ -30,6 +35,7 @@ export function routesFor(session: SessionView): RouteObject[] {
           ...(item.path === '/' ? { index: true } : { path: item.path.slice(1) }),
           element: pageFor(item, session),
         })),
+        { path: 'players/:id', element: <PlayerPage /> },
         { path: '*', element: <NotFound /> },
       ],
     },

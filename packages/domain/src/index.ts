@@ -24,3 +24,5 @@ export * from './leaderboard.ts';
 export * from './admin.ts';
 export * from './profile.ts';
 export * from './dashboard.ts';
+export * from './admin-players.ts';
+export * from './transactions-query.ts';

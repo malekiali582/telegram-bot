@@ -38,3 +38,37 @@ export const CURSE_NAMES: Readonly<Record<CurseKind, string>> = {
   hunt_haste: 'شتاب شکار',
   lolo_echo: 'پژواک لولو',
 };
+
+/**
+ * Transaction kinds as admins see them (panel, CSV export). A test checks that every
+ * kind the domain services record has a name here.
+ */
+export const TRANSACTION_KIND_NAMES: Readonly<Record<string, string>> = {
+  lolo_reward: 'پاداش لولو',
+  food_income: 'واریز غذا',
+  cemetery_income: 'درآمد قبرستان',
+  interest: 'سود گنجینه',
+  streak_reward: 'پاداش استریک',
+  ghost_heard: 'پاداش روح (شنیدم)',
+  ghost_search: 'جست‌وجوی روح',
+  hunt: 'شکار',
+  eat: 'خوردن غذا',
+  level_upgrade: 'ارتقای سطح',
+  tool_purchase: 'خرید ابزار',
+  cemetery_open: 'خرید قبرستان',
+  cemetery_upgrade: 'ارتقای قبرستان',
+  treasury_deposit: 'واریز به گنجینه',
+  treasury_withdraw: 'برداشت از گنجینه',
+  transfer: 'انتقال بین بازیکنان',
+  blood_donation: 'اهدای خون',
+  hunt_donation: 'اهدای شکار',
+  city_upgrade: 'ارتقای لولوآباد',
+  blood_bank_upgrade: 'ارتقای بانک خون',
+  hunting_ground_upgrade: 'ارتقای شکارگاه',
+  curse_upgrade: 'ارتقای نفرین',
+  admin_adjustment: 'اصلاح مدیر',
+};
+
+export function transactionKindName(kind: string): string {
+  return TRANSACTION_KIND_NAMES[kind] ?? kind;
+}

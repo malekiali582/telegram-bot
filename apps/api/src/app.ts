@@ -15,7 +15,9 @@ import { ApiError, codeForStatus, errorMessage } from './errors.ts';
 import { authRoutes } from './routes/auth.ts';
 import { dashboardRoutes } from './routes/dashboard.ts';
 import { healthRoutes } from './routes/health.ts';
+import { playerRoutes } from './routes/players.ts';
 import { systemRoutes } from './routes/system.ts';
+import { transactionRoutes } from './routes/transactions.ts';
 import { applySecurityHeaders } from './security.ts';
 
 declare module 'fastify' {
@@ -238,5 +240,7 @@ export async function buildApi(
   await app.register(authRoutes, { deps });
   await app.register(dashboardRoutes, { deps });
   await app.register(systemRoutes, { deps });
+  await app.register(playerRoutes, { deps });
+  await app.register(transactionRoutes, { deps });
   return { app, routes };
 }
