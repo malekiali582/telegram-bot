@@ -67,7 +67,9 @@ describe('migration 0005 on old data (pglite)', () => {
     await h.db.execute(sql`INSERT INTO config_versions (config, source, note, effective_from)
       VALUES (${JSON.stringify(tuned)}::jsonb, 'panel', 'tuned', '2026-10-01T00:00:00Z')`);
 
-    expect((await run()).applied).toEqual(['0005_owner_rules_round2', '0006_daily_streaks']);
+    expect((await run()).applied).toEqual(
+      all.filter((m) => m.version >= '0005').map((m) => m.version),
+    );
 
     const provider = new ConfigProvider();
     const early = await provider.effectiveAt(h.db, new Date('2026-09-01T00:00:00Z'));

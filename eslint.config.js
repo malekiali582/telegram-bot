@@ -34,6 +34,11 @@ export default tseslint.config(
     },
   },
   {
+    // The admin panel runs in the browser.
+    files: ['apps/admin/src/**/*.{ts,tsx}'],
+    languageOptions: { globals: { ...globals.browser } },
+  },
+  {
     files: ['**/*.js'],
     ...tseslint.configs.disableTypeChecked,
   },

@@ -34,6 +34,7 @@ describe(`migrations (${testBackend()})`, () => {
       '0004_ghost_message_refs',
       '0005_owner_rules_round2',
       '0006_daily_streaks',
+      '0007_sample_markers',
     ]);
     expect(checksum('a\r\nb')).toBe(checksum('a\nb'));
   });
@@ -49,6 +50,7 @@ describe(`migrations (${testBackend()})`, () => {
       '0004_ghost_message_refs',
       '0005_owner_rules_round2',
       '0006_daily_streaks',
+      '0007_sample_markers',
     ]);
     expect(await migrateDatabase(t)).toEqual({ applied: [] });
   });

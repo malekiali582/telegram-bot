@@ -40,6 +40,8 @@ export const users = pgTable('users', {
   isBot: boolean('is_bot').notNull().default(false),
   bannedAt: instant('banned_at'),
   banReason: text('ban_reason'),
+  /** Development sample data (`npm run dev:panel`); never set in production. */
+  isSample: boolean('is_sample').notNull().default(false),
   createdAt: instant('created_at').notNull().defaultNow(),
   updatedAt: instant('updated_at').notNull().defaultNow(),
 });
@@ -61,6 +63,8 @@ export const groups = pgTable('groups', {
   botStatus: text('bot_status').$type<'member' | 'removed'>().notNull().default('member'),
   botAddedAt: instant('bot_added_at').notNull().defaultNow(),
   botRemovedAt: instant('bot_removed_at'),
+  /** Development sample data (`npm run dev:panel`); never set in production. */
+  isSample: boolean('is_sample').notNull().default(false),
   createdAt: instant('created_at').notNull().defaultNow(),
   updatedAt: instant('updated_at').notNull().defaultNow(),
 });

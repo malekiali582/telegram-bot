@@ -6,3 +6,4 @@ package-lock.json
 .tsbuild
 PROMPT.md
 .lulu-dev
+.lulu-panel-dev

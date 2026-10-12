@@ -1,0 +1,41 @@
+@import 'tailwindcss';
+
+/* Quiet charcoal surfaces with a soft violet accent. Logical properties (ps/pe, start/end)
+   everywhere, so the layout is right-to-left without mirrored overrides. */
+@theme {
+  --color-bg: #141318;
+  --color-surface: #1c1b22;
+  --color-raised: #24232c;
+  --color-line: #2f2d39;
+  --color-ink: #ebe9f2;
+  --color-muted: #9d99ad;
+  --color-faint: #6f6b80;
+  --color-accent: #b4a0fb;
+  --color-accent-strong: #8b6cf0;
+  --color-accent-soft: #2a2440;
+  --color-danger: #f28b8b;
+  --color-danger-soft: #3a2026;
+  --color-warn: #f2c66d;
+  --color-warn-soft: #362d1b;
+  --color-ok: #7ad69a;
+
+  --font-sans: Vazirmatn, 'Segoe UI', Tahoma, 'Noto Sans Arabic', system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply min-h-dvh bg-bg font-sans text-ink antialiased;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+  }
+  /* Numbers, ids and dates keep their own direction inside right-to-left text. */
+  .ltr-nums {
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+}

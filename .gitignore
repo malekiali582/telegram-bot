@@ -15,6 +15,7 @@ coverage/
 
 # local databases (dev mode, PGlite data dirs, dumps)
 .lulu-dev/
+.lulu-panel-dev/
 .pglite/
 *.pglite/
 pgdata/

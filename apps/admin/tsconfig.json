@@ -1,0 +1,23 @@
+{
+  "//": "Browser code, bundled by Vite. tsc only type-checks it (declarations go to a git-ignored cache).",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "../../.tsbuild/admin",
+    "tsBuildInfoFile": "../../.tsbuild/admin/.tsbuildinfo",
+    "emitDeclarationOnly": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "jsx": "react-jsx"
+  },
+  "include": ["src"],
+  "references": [
+    {
+      "path": "../api"
+    }
+  ]
+}

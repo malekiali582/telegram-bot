@@ -80,6 +80,16 @@ describe('api env', () => {
     expect(env.COOKIE_SECURE).toBe(true);
   });
 
+  it('reads the trusted proxy as off, on, a hop count or addresses', () => {
+    const proxy = (API_TRUST_PROXY?: string) =>
+      parseEnv(apiEnvSchema, { ...base, API_TRUST_PROXY }).API_TRUST_PROXY;
+    expect(proxy()).toBe(false);
+    expect(proxy('false')).toBe(false);
+    expect(proxy('true')).toBe(true);
+    expect(proxy('1')).toBe(1);
+    expect(proxy('127.0.0.1, 10.0.0.0/8')).toBe('127.0.0.1, 10.0.0.0/8');
+  });
+
   it('rejects short session secrets and insecure cookies in production', () => {
     expect(() => parseEnv(apiEnvSchema, { ...base, SESSION_SECRET: 'short' })).toThrow(
       /SESSION_SECRET/,

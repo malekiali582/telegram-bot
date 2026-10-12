@@ -22,7 +22,11 @@ export default defineConfig(({ mode }) => {
       },
     },
     test: {
-      include: ['{apps,packages}/*/src/**/*.test.ts', 'tests/**/*.test.ts', 'scripts/**/*.test.ts'],
+      include: [
+        '{apps,packages}/*/src/**/*.test.{ts,tsx}',
+        'tests/**/*.test.ts',
+        'scripts/**/*.test.ts',
+      ],
       environment: 'node',
       globalSetup: ['tests/setup/postgres-global-setup.ts'],
       reporters: ['default', './tests/setup/strict-reporter.ts'],

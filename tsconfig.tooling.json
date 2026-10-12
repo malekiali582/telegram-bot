@@ -8,7 +8,7 @@
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["vitest.config.ts", "tests/**/*.ts", "scripts/**/*.ts"],
+  "include": ["vitest.config.ts", "tests/**/*.ts", "scripts/**/*.ts", "apps/admin/vite.config.ts"],
   "references": [
     {
       "path": "./packages/config"
@@ -33,6 +33,9 @@
     },
     {
       "path": "./apps/worker"
+    },
+    {
+      "path": "./apps/api"
     }
   ]
 }

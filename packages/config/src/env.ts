@@ -83,6 +83,21 @@ export const apiEnvSchema = z
     ADMIN_ORIGIN: z.url(),
     SESSION_SECRET: z.string().min(32, 'must be at least 32 characters'),
     COOKIE_SECURE: bool,
+    /**
+     * The reverse proxy in front of the API, so the login limit sees the client's IP:
+     * `false` (none), `true`, a hop count, or comma-separated addresses/CIDRs such as
+     * `127.0.0.1`. Never `true` when the API port is reachable directly.
+     */
+    API_TRUST_PROXY: z
+      .string()
+      .optional()
+      .transform((v): boolean | number | string => {
+        const value = v?.trim() ?? '';
+        if (value === '' || value === 'false') return false;
+        if (value === 'true') return true;
+        if (/^\d+$/.test(value)) return Number(value);
+        return value;
+      }),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && !env.COOKIE_SECURE) {
