@@ -54,6 +54,12 @@ function dashboard(over: Partial<DashboardView> = {}): DashboardView {
       week: { ...flow, produced: [{ code: 'mint:streak', centi: '9900' }] },
       month: flow,
     },
+    ghosts: {
+      today: '2026-10-12',
+      lookaheadDays: 3,
+      missingDates: ['2026-10-14', '2026-10-15'],
+      warning: null,
+    },
     inflation: {
       status: 'warning',
       day: {
@@ -191,6 +197,13 @@ describe('dashboard page', () => {
     // Newest first: today's 31 000 points in the cash and total columns.
     expect(within(table).getAllByText('۳۱٬۰۰۰')).toHaveLength(2);
     expect(within(table).getByText('۲۰ مهر ۱۴۰۵')).toBeTruthy();
+  });
+
+  it('points to the ghost page when coming nights have no content', async () => {
+    withDashboard(dashboard());
+    renderPanel('/');
+    expect(await screen.findByText('۲ شب از ۳ شب آینده بستهٔ روح ندارد.')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'افزودن بسته' }).getAttribute('href')).toBe('/ghosts');
   });
 
   it('shows the system summary with labelled states', async () => {

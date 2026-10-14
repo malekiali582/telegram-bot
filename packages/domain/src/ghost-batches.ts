@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { GAME_TIME_ZONE } from '@lulu/config';
 import { maxGhostStoryLength } from '@lulu/platform';
-import { ghostBatches, ghostStories, inTransaction } from '@lulu/database';
+import { auditLogs, ghostBatches, ghostStories, inTransaction } from '@lulu/database';
 import { and, desc, eq, inArray, lte } from 'drizzle-orm';
 import { z } from 'zod';
 import type { DomainContext } from './context.ts';
@@ -94,12 +94,18 @@ export type ImportGhostBatchResult =
 /**
  * Stores a validated batch as `scheduled`; it goes live at the start of its Tehran
  * `activeDate` (see `activateDueBatches`). Importing the same batch again is a no-op,
- * so the file importer and the panel form can both call this safely.
+ * so the file importer and the panel form can both call this safely. An import by an
+ * admin is written to the audit log in the same transaction.
  */
 export async function importGhostBatch(
   ctx: DomainContext,
   input: unknown,
-  options: { source: 'file' | 'panel' | 'dev_seed'; isSample?: boolean; adminUserId?: number },
+  options: {
+    source: 'file' | 'panel' | 'dev_seed';
+    isSample?: boolean;
+    adminUserId?: number;
+    requestId?: string;
+  },
 ): Promise<ImportGhostBatchResult> {
   const now = ctx.clock.now();
   const { config } = await ctx.config.effectiveAt(ctx.db, now);
@@ -158,6 +164,18 @@ export async function importGhostBatch(
         text: s.text,
       })),
     );
+    if (options.adminUserId !== undefined) {
+      await tx.insert(auditLogs).values({
+        actor: 'admin',
+        adminUserId: options.adminUserId,
+        action: 'ghost.import',
+        targetType: 'ghost_batch',
+        targetId: String(row.id),
+        details: { batchId: batch.batchId, activeDate: batch.activeDate },
+        requestId: options.requestId ?? null,
+        createdAt: now,
+      });
+    }
     return { status: 'imported' as const, batchId: batch.batchId, activeDate: batch.activeDate };
   });
 }

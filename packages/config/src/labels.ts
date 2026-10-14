@@ -146,6 +146,11 @@ export const LABEL_RULES: readonly LabelRule[] = [
     'هشدار تورم: کمترین پول در گردش برای سنجیدن رشد (پوینت)',
     'B-2',
   ),
+  suggested(
+    'monitoring.ghostLookaheadDays',
+    'هشدار محتوای روح: چند روز آینده باید بستهٔ آماده داشته باشد',
+    '§۱۳',
+  ),
 ];
 
 export interface ConfigLeaf {

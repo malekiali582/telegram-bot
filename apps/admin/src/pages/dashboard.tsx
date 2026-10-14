@@ -1,6 +1,6 @@
 import type { DashboardView, FlowView, ServiceState } from '@lulu/api/contract';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { CircleCheck, CircleX, Info, RotateCw, TriangleAlert } from 'lucide-react';
+import { CircleCheck, CircleX, Ghost, Info, RotateCw, TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Link } from 'react-router';
@@ -35,6 +35,26 @@ export function useDashboard() {
     // A refetch keeps the current numbers on screen instead of flashing a spinner.
     placeholderData: keepPreviousData,
   });
+}
+
+/** A short pointer to the ghost page when coming nights have no content. */
+function GhostNotice({ ghosts }: { ghosts: DashboardView['ghosts'] }) {
+  if (!ghosts.warning && ghosts.missingDates.length === 0) return null;
+  const text =
+    ghosts.warning === 'no_active_batch'
+      ? 'هیچ بستهٔ روح فعالی نیست.'
+      : ghosts.warning === 'stale_batch'
+        ? 'بستهٔ روح امروز نرسیده و متن‌های قبلی تکرار می‌شوند.'
+        : `${formatNumber(ghosts.missingDates.length)} شب از ${formatNumber(ghosts.lookaheadDays)} شب آینده بستهٔ روح ندارد.`;
+  return (
+    <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-warn/40 bg-warn-soft px-4 py-3 text-sm">
+      <Ghost aria-hidden className="size-5 shrink-0 text-warn" />
+      <p className="flex-1">{text}</p>
+      <Link to="/ghosts" className="text-accent hover:underline">
+        افزودن بسته
+      </Link>
+    </div>
+  );
 }
 
 function InflationNotice({ inflation }: { inflation: DashboardView['inflation'] }) {
@@ -205,6 +225,7 @@ export function DashboardPage() {
       </PageHeader>
 
       <InflationNotice inflation={d.inflation} />
+      <GhostNotice ghosts={d.ghosts} />
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile

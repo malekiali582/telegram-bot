@@ -189,5 +189,6 @@ export const DEFAULT_GAME_CONFIG: GameConfig = {
     inflationDailyWarnBp: 1_000,
     inflationWeeklyWarnBp: 3_000,
     inflationMinCirculation: 10_000,
+    ghostLookaheadDays: 3,
   },
 };

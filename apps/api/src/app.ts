@@ -15,6 +15,7 @@ import { ApiError, codeForStatus, errorMessage } from './errors.ts';
 import { authRoutes } from './routes/auth.ts';
 import { configRoutes } from './routes/config.ts';
 import { dashboardRoutes } from './routes/dashboard.ts';
+import { ghostRoutes } from './routes/ghosts.ts';
 import { groupRoutes } from './routes/groups.ts';
 import { healthRoutes } from './routes/health.ts';
 import { playerRoutes } from './routes/players.ts';
@@ -246,5 +247,6 @@ export async function buildApi(
   await app.register(transactionRoutes, { deps });
   await app.register(groupRoutes, { deps });
   await app.register(configRoutes, { deps });
+  await app.register(ghostRoutes, { deps });
   return { app, routes };
 }

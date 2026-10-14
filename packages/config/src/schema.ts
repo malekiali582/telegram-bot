@@ -190,6 +190,8 @@ export const gameConfigSchema = z
       inflationWeeklyWarnBp: bp,
       /** Below this much money in circulation (points), growth rates are not judged. */
       inflationMinCirculation: points,
+      /** Warn when a Tehran day this many days ahead has no ghost batch waiting. */
+      ghostLookaheadDays: z.int().min(1).max(60),
     }),
   })
   .superRefine((c, ctx) => {

@@ -134,6 +134,7 @@ export interface DashboardView {
     week: GrowthView;
     minCirculation: Centi;
   };
+  ghosts: GhostCoverageView;
   system: SystemSummaryView;
 }
 
@@ -564,3 +565,64 @@ export interface RollbackConfigRequest {
   baseVersionId: number;
   password?: string;
 }
+
+// ───────────────────────── ghost content (8.6) ─────────────────────────
+
+export type GhostBatchStatus = 'scheduled' | 'active' | 'retired' | 'cancelled';
+
+export interface GhostBatchView {
+  id: number;
+  batchId: string;
+  /** Tehran date (YYYY-MM-DD) the batch goes live at midnight. */
+  activeDate: string;
+  status: GhostBatchStatus;
+  isSample: boolean;
+  source: 'file' | 'panel' | 'dev_seed';
+  importedAt: Instant;
+  importedBy: string | null;
+  activatedAt: Instant | null;
+  retiredAt: Instant | null;
+  /** Ghosts found with its texts, and how many were answered with «شنیدم». */
+  encounters: number;
+  heard: number;
+}
+
+export interface GhostCoverageView {
+  today: string;
+  lookaheadDays: number;
+  /** Tehran days from tomorrow to `lookaheadDays` ahead with no batch waiting. */
+  missingDates: string[];
+  /** No live batch at all, or the live one is older than today. */
+  warning: 'no_active_batch' | 'stale_batch' | null;
+}
+
+export interface GhostOverviewView extends GhostCoverageView {
+  limits: { batchSize: number; maxStoryLength: number; decidedBy: PlatformName };
+  active: GhostBatchView | null;
+  upcoming: GhostBatchView[];
+  past: GhostBatchView[];
+  pastTotal: number;
+}
+
+export interface GhostBatchDetailView {
+  batch: GhostBatchView;
+  stories: {
+    position: number;
+    storyKey: string;
+    text: string;
+    encounters: number;
+    heard: number;
+  }[];
+  cancellation: { by: string | null; reason: string | null; at: Instant } | null;
+}
+
+export interface AddGhostBatchRequest {
+  activeDate: string;
+  texts: string[];
+}
+
+export type AddGhostBatchView =
+  | { status: 'imported'; id: number; batchId: string; activeDate: string; live: boolean }
+  | { status: 'already_imported'; batchId: string }
+  /** Persian reasons: for the date, for each text (null when fine) and for the form. */
+  | { status: 'invalid'; activeDate: string | null; texts: (string | null)[]; form: string | null };

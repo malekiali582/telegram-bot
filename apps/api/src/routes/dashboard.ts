@@ -1,5 +1,5 @@
 import type { CirculationPoint, FlowSummary, GrowthMeasure } from '@lulu/domain';
-import { economyOverview } from '@lulu/domain';
+import { economyOverview, ghostCoverage } from '@lulu/domain';
 import type { FastifyPluginCallback } from 'fastify';
 import type { ApiDeps } from '../app.ts';
 import type { CirculationView, DashboardView, FlowView, GrowthView } from '../contract.ts';
@@ -51,6 +51,7 @@ export const dashboardRoutes: FastifyPluginCallback<{ deps: ApiDeps }> = (app, {
         week: growth(o.inflation.week),
         minCirculation: o.inflation.minCirculationCenti.toString(),
       },
+      ghosts: await ghostCoverage(ctx),
       system: await systemSummary(ctx.db, ctx.clock.now()),
     };
   });
