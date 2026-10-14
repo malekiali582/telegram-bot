@@ -1,0 +1,24 @@
+# LULU worker (message queue and scheduled jobs). Copy to /etc/systemd/system/ (docs/server-setup.md).
+[Unit]
+Description=LULU worker (message queue and scheduled jobs)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lulu
+Group=lulu
+WorkingDirectory=/srv/lulu
+EnvironmentFile=/srv/lulu/.env
+ExecStart=/usr/bin/node apps/worker/dist/main.js
+Restart=always
+RestartSec=5
+# Give the process time to finish what it is doing on stop (it shuts down cleanly).
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

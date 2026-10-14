@@ -1,8 +1,14 @@
 import { createTestGame } from '@lulu/domain/testing';
 import type { TestGame } from '@lulu/domain/testing';
-import { adminSessions, adminUsers, auditLogs } from '@lulu/database';
+import { adminLoginAttempts, adminSessions, adminUsers, auditLogs } from '@lulu/database';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createInitialOwner, createAdminUser, resetAdminPassword } from './admins.ts';
+import {
+  createInitialOwner,
+  createAdminUser,
+  resetAdminPassword,
+  resetPasswordFromConsole,
+} from './admins.ts';
 import { checkNewPassword, hashPassword, verifyPassword } from './password.ts';
 import { createSession, findActiveSession } from './sessions.ts';
 
@@ -100,5 +106,55 @@ describe('admin accounts', () => {
     expect(await findActiveSession(game.ctx.db, session.token, now, 30 * 60_000)).toBeNull();
     const [row] = await game.ctx.db.select().from(adminSessions);
     expect(row?.tokenHash).not.toBe(session.token);
+  });
+});
+
+describe('password recovery on the server', () => {
+  let game: TestGame;
+  beforeEach(async () => {
+    game = await createTestGame('2026-10-14T08:00:00Z');
+  });
+  afterEach(async () => {
+    await game.close();
+  });
+
+  it('gives a locked-out, disabled owner a new password and clears the lockout', async () => {
+    const now = game.clock.now();
+    const created = await createAdminUser(game.ctx.db, {
+      username: 'boss',
+      password: 'the old long password',
+      role: 'owner',
+      now,
+    });
+    if (created.status !== 'ok') throw new Error(created.status);
+    await game.ctx.db
+      .update(adminUsers)
+      .set({ disabledAt: now })
+      .where(eq(adminUsers.id, created.adminUserId));
+    await game.ctx.db
+      .insert(adminLoginAttempts)
+      .values(
+        Array.from({ length: 6 }, () => ({ username: 'boss', ip: '1.2.3.4', succeeded: false })),
+      );
+
+    expect(await resetPasswordFromConsole(game.ctx.db, { username: 'nobody', now })).toEqual({
+      status: 'not_found',
+      usernames: ['boss'],
+    });
+    const reset = await resetPasswordFromConsole(game.ctx.db, { username: ' BOSS ', now });
+    expect(reset).toMatchObject({ status: 'ok', username: 'boss', reenabled: true });
+    if (reset.status !== 'ok') return;
+    expect(reset.password.length).toBeGreaterThanOrEqual(20);
+
+    const [row] = await game.ctx.db.select().from(adminUsers);
+    expect(row!.disabledAt).toBeNull();
+    expect(await verifyPassword(reset.password, row!.passwordHash)).toBe(true);
+    expect(await game.ctx.db.select().from(adminLoginAttempts)).toEqual([]);
+    const [audit] = await game.ctx.db.select().from(auditLogs);
+    expect(audit).toMatchObject({
+      actor: 'system',
+      action: 'admin.password_reset',
+      details: { username: 'boss', source: 'console', reenabled: true },
+    });
   });
 });

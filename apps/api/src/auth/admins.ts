@@ -1,5 +1,6 @@
+import { randomBytes } from 'node:crypto';
 import type { Database, Executor } from '@lulu/database';
-import { adminUsers, auditLogs, inTransaction } from '@lulu/database';
+import { adminLoginAttempts, adminUsers, auditLogs, inTransaction } from '@lulu/database';
 import { lockKey } from '@lulu/domain';
 import { eq, isNull, sql } from 'drizzle-orm';
 import type { AdminRole } from '../contract.ts';
@@ -93,4 +94,47 @@ export async function activeOwners(ex: Executor): Promise<{ id: number; username
     .from(adminUsers)
     .where(sql`${adminUsers.role} = 'owner' AND ${isNull(adminUsers.disabledAt)}`)
     .orderBy(adminUsers.id);
+}
+
+export type ConsoleResetResult =
+  | { status: 'ok'; username: string; password: string; reenabled: boolean }
+  | { status: 'not_found'; usernames: string[] };
+
+/**
+ * Recovery on the server itself (`npm run admin:reset-password -- <username>`), for when
+ * the only owner has lost the password: a new random password (shown once), every session
+ * of that account ended, its failed-login counter cleared, and the account enabled again
+ * if it was disabled. Recorded in the audit log as a system action.
+ */
+export async function resetPasswordFromConsole(
+  db: Database,
+  input: { username: string; now: Date },
+): Promise<ConsoleResetResult> {
+  const username = normalizeUsername(input.username);
+  const password = randomBytes(15).toString('base64url');
+  const passwordHash = await hashPassword(password);
+  return inTransaction(db, async (tx) => {
+    await lockKey(tx, 'admin-users');
+    const [row] = await tx.select().from(adminUsers).where(eq(adminUsers.username, username));
+    if (!row) {
+      const all = await tx.select({ username: adminUsers.username }).from(adminUsers);
+      return { status: 'not_found' as const, usernames: all.map((a) => a.username).sort() };
+    }
+    const reenabled = row.disabledAt !== null;
+    await tx
+      .update(adminUsers)
+      .set({ passwordHash, disabledAt: null })
+      .where(eq(adminUsers.id, row.id));
+    await revokeAdminSessions(tx, row.id, input.now);
+    await tx.delete(adminLoginAttempts).where(eq(adminLoginAttempts.username, username));
+    await tx.insert(auditLogs).values({
+      actor: 'system',
+      action: 'admin.password_reset',
+      targetType: 'admin_user',
+      targetId: String(row.id),
+      details: { username, source: 'console', reenabled },
+      createdAt: input.now,
+    });
+    return { status: 'ok' as const, username, password, reenabled };
+  });
 }

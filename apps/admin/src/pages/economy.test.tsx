@@ -263,6 +263,7 @@ describe('economy settings page', () => {
     };
     renderPanel('/economy?tab=history');
     expect(await screen.findByText('نسخهٔ ۸')).toBeTruthy();
+    expect(screen.getByText('از ابتدا')).toBeTruthy(); // the built-in version, not «1970»
     expect(screen.getByText('فعلی')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'دیدن تغییرها' }));
     expect(await screen.findByText('tools.knife.price')).toBeTruthy();

@@ -21,6 +21,10 @@ import { PageHeader } from './placeholder.tsx';
 type Value = number | string | null;
 type Draft = Record<string, Value>;
 
+/** The built-in first version is dated at the epoch («from the start»), not 1970. */
+const versionSince = (at: string) =>
+  new Date(at).getUTCFullYear() < 2000 ? 'از ابتدا' : `از ${formatDateTime(at)}`;
+
 const input =
   'w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm outline-none focus:border-accent';
 
@@ -328,9 +332,15 @@ function SettingsTab({ session }: { session: SessionView }) {
   return (
     <>
       <p className="mb-4 text-sm text-muted">
-        نسخهٔ فعلی {formatNumber(form.versionId)} · از {formatDateTime(form.effectiveFrom)}
+        نسخهٔ فعلی {formatNumber(form.versionId)} · {versionSince(form.effectiveFrom)}
         {form.createdBy ? ` · ${form.createdBy}` : ' · پیش‌فرض کد'}
-        {form.note ? ` · «${form.note}»` : ''}
+        {form.note ? (
+          <>
+            {' · «'}
+            <bdi>{form.note}</bdi>
+            {'»'}
+          </>
+        ) : null}
       </p>
       <p className="mb-4 text-xs text-faint">
         مقدارهای «قطعی» قانون‌های مالک‌اند و فقط مالک با تکرار رمز تغییرشان می‌دهد. هر ثبت یک نسخهٔ
@@ -504,7 +514,7 @@ function VersionRow({
           <span className="rounded-full border border-ok/40 px-2 py-0.5 text-xs text-ok">فعلی</span>
         ) : null}
         {v.ownerRulesChanged ? <LabelBadge label="fixed" /> : null}
-        <span className="text-muted">{formatDateTime(v.effectiveFrom)}</span>
+        <span className="text-muted">{versionSince(v.effectiveFrom)}</span>
         <span className="text-muted">
           {v.source === 'default' ? 'پیش‌فرض کد' : (v.createdBy ?? '')}
         </span>

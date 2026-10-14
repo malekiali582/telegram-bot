@@ -80,6 +80,11 @@ async function shutdown(code: number, message?: string): Promise<void> {
   process.exit(code);
 }
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => void shutdown(0));
+// A parent process (npm run check:panel-browser) asks for a clean stop over IPC: on
+// Windows a signal ends the process at once, leaving the embedded PostgreSQL running.
+process.on('message', (message) => {
+  if (message === 'shutdown') void shutdown(0);
+});
 const fail = async (message: string): Promise<never> => {
   await shutdown(1, `\n❌ ${message}\n\n`);
   return new Promise<never>(() => {});

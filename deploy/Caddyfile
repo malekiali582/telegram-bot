@@ -1,0 +1,19 @@
+# Caddy for LULU: HTTPS (automatic certificate from Let's Encrypt) in front of the bot's
+# webhook and the API/panel. Replace lulu.example.com with your domain (it must already
+# point at this server), then: sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+#                               sudo systemctl reload caddy
+# Guide: docs/server-setup.md, docs/operations.md
+
+lulu.example.com {
+	encode zstd gzip
+
+	# Telegram → the bot process (TELEGRAM_WEBHOOK_PORT)
+	handle /telegram/webhook {
+		reverse_proxy 127.0.0.1:8443
+	}
+
+	# Everything else → the API, which also serves the panel (API_PORT)
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+}

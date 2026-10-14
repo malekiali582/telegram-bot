@@ -18,54 +18,74 @@
 اسکریپت: `scripts/server/pg-backup.sh`
 
 - با PostgreSQL داخل `docker compose` کار می‌کند. رمز را از محیط خود کانتینر می‌خواند و چیزی روی خط فرمان نمی‌آید.
-- فایل را در `backups/pg/lulu-<زمان>.dump` می‌نویسد و کنارش `sha256` می‌گذارد.
+- فایل را در `PG_BACKUP_DIR` می‌نویسد، با نام `lulu-<زمان>.dump`، و کنارش `sha256` می‌گذارد. روی سرور این پوشه `/var/backups/lulu` است؛ پیش‌فرض اسکریپت `backups/pg` است.
 - پیش از نهایی کردن، با `pg_restore --list` بررسی می‌کند که فایل سالم و خواندنی است.
 - فایل‌های قدیمی‌تر از ۱۴ روز را پاک می‌کند (`PG_BACKUP_KEEP_DAYS`).
 - اگر PostgreSQL روی خود سرور نصب است و نه در داکر: `PG_BACKUP_VIA=local` و `DATABASE_URL`.
 
-**اجرای خودکار هر شب ساعت ۳:۳۰** (با `crontab -e`، مسیر پروژه را درست بگذارید):
+**اجرای خودکار هر شب:** راهنمای راه‌اندازی (`docs/server-setup.md`، قدم ۱۵) فایل `/etc/cron.d/lulu-backup` را می‌سازد. این فایل هر شب ساعت ۲۳:۳۰ UTC، یعنی ۳ بامداد به وقت تهران، اسکریپت را اجرا می‌کند:
 
 ```
-30 3 * * * cd /srv/lulu && scripts/server/pg-backup.sh >> backups/pg/backup.log 2>&1
+30 23 * * * root cd /srv/lulu && PG_BACKUP_DIR=/var/backups/lulu bash scripts/server/pg-backup.sh >> /var/log/lulu-backup.log 2>&1
 ```
+
+`deploy/update.sh` هم پیش از هر به‌روزرسانی یک بکاپ در همین پوشه می‌گیرد.
 
 ## ۲. بازگردانی بکاپ `pg_dump` با `pg_restore`
 
+همهٔ دستورهای این بخش را روی سرور و داخل پوشهٔ پروژه بزنید (`cd /srv/lulu`).
+
 بازگردانی همیشه در **یک دیتابیس تازه** انجام می‌شود. دیتابیس فعلی تا آخر کار دست نمی‌خورد، پس اگر چیزی اشتباه شد هنوز برمی‌گردید.
 
-1. **ربات، worker و API را متوقف کنید** (هر روشی که روی سرور اجرایشان می‌کند، مثلاً `systemctl stop lulu-bot lulu-worker lulu-api`).
+1. **ربات، worker و API را متوقف کنید** (`sudo systemctl stop lulu-bot lulu-worker lulu-api`).
 
 2. **دیتابیس تازه بسازید:**
 
    ```
-   docker compose exec -T postgres sh -c 'createdb -U "$POSTGRES_USER" lulu_restore'
+
    ```
+
+sudo docker compose exec -T postgres sh -c 'createdb -U "$POSTGRES_USER" lulu_restore'
+
+```
 
 3. **بکاپ را در آن بازگردانید** (نام فایل را عوض کنید):
 
-   ```
-   docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d lulu_restore --no-owner --exit-on-error' < backups/pg/lulu-20261012-000000Z.dump
-   ```
+```
 
-   `pg_restore` اول داده‌ها را می‌ریزد و بعد triggerها و محدودیت‌ها را می‌سازد، پس قفل‌های امنیتی پول در حین بارگذاری مزاحم نمی‌شوند و بعد از آن دوباره فعال‌اند.
+sudo docker compose exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d lulu_restore --no-owner --exit-on-error' < /var/backups/lulu/lulu-20261012-000000Z.dump
+
+```
+
+`pg_restore` اول داده‌ها را می‌ریزد و بعد triggerها و محدودیت‌ها را می‌سازد، پس قفل‌های امنیتی پول در حین بارگذاری مزاحم نمی‌شوند و بعد از آن دوباره فعال‌اند.
 
 4. **بررسی کنید.** جمع کل دفتر حساب باید دقیقاً `0` باشد:
 
-   ```
-   docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d lulu_restore -c "SELECT count(*) AS players FROM users; SELECT sum(amount) AS ledger_total FROM ledger_entries;"'
-   ```
+```
+
+sudo docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d lulu_restore -c "SELECT count(*) AS players FROM users; SELECT sum(amount) AS ledger_total FROM ledger_entries;"'
+
+```
 
 5. **جابه‌جا کنید.** دیتابیس قدیمی با نام دیگر نگه داشته می‌شود:
 
-   ```
-   docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "ALTER DATABASE lulu RENAME TO lulu_old;" -c "ALTER DATABASE lulu_restore RENAME TO lulu;"'
-   ```
+```
 
-   (اگر نام دیتابیس شما در `POSTGRES_DB` چیز دیگری است، همان را بگذارید.)
+sudo docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "ALTER DATABASE lulu RENAME TO lulu_old;" -c "ALTER DATABASE lulu_restore RENAME TO lulu;"'
+
+```
+
+(اگر نام دیتابیس شما در `POSTGRES_DB` چیز دیگری است، همان را بگذارید.)
 
 6. **سرویس‌ها را روشن کنید.** اگر بکاپ از نسخهٔ قدیمی‌تر کد است، migrationهای تازه هنگام روشن شدن خودکار اعمال می‌شوند. همهٔ مدیران باید دوباره وارد پنل شوند.
 
-7. بعد از چند روز که مطمئن شدید، `lulu_old` را پاک کنید: `dropdb lulu_old`.
+7. بعد از چند روز که مطمئن شدید، `lulu_old` را پاک کنید:
+
+```
+
+sudo docker compose exec -T postgres sh -c 'dropdb -U "$POSTGRES_USER" lulu_old'
+
+```
 
 ## ۳. بکاپ منطقی (پنل)
 
@@ -80,11 +100,13 @@
 2. در `.env` مقدار `DATABASE_URL` را روی دیتابیس مقصد بگذارید. بهتر است یک دیتابیس **تازه و خالی** باشد.
 3. اجرا کنید:
 
-   ```
-   npm run backup:restore -- backups/lulu-backup-20261012-153000Z.jsonl.gz
-   ```
+```
 
-   اگر دیتابیس مقصد داده دارد و می‌خواهید **کاملاً جایگزین** شود، `--replace` را اضافه کنید.
+npm run backup:restore -- backups/lulu-backup-20261012-153000Z.jsonl.gz
+
+```
+
+اگر دیتابیس مقصد داده دارد و می‌خواهید **کاملاً جایگزین** شود، `--replace` را اضافه کنید.
 
 کار بازگردانی:
 
@@ -98,4 +120,5 @@
 بکاپی که هرگز بازگردانده نشده، بکاپ مطمئنی نیست.
 
 - **خودکار:** `tests/backup.test.ts` در هر اجرای تست، روی PGlite و PostgreSQL واقعی، داده‌ای را که سرویس‌های واقعی بازی ساخته‌اند بکاپ می‌گیرد، در دیتابیس تازه بازمی‌گرداند و همهٔ جدول‌ها را ردیف‌به‌ردیف مقایسه می‌کند. ردّ فایل ناقص، فایل جعلی و دیتابیس جلوتر هم آزموده می‌شود.
-- **دستی، هر ماه یک بار روی سرور:** آخرین `.dump` را طبق گام‌های ۲ تا ۴ در `lulu_restore` بازگردانید، بررسی کنید و بعد `dropdb lulu_restore`. به دیتابیس اصلی دست نمی‌خورد.
+- **دستی، هر ماه یک بار روی سرور:** آخرین `.dump` را طبق گام‌های ۲ تا ۴ در `lulu_restore` بازگردانید، بررسی کنید و بعد پاکش کنید: `sudo docker compose exec -T postgres sh -c 'dropdb -U "$POSTGRES_USER" lulu_restore'`. به دیتابیس اصلی دست نمی‌خورد.
+```
