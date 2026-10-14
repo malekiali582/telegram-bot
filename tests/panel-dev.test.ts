@@ -168,14 +168,16 @@ describe('sample data', () => {
     expect(profile).toBeDefined();
   });
 
-  it('includes the cases the panel must show: ban, removed bot, chat migration, ghosts, failures', async () => {
+  it('includes the cases the panel must show: ban, removed bot, chat migration and conflict, disabled group, ghosts, failures', async () => {
     const [cases] = await rows<Record<string, number>>(
       sql`SELECT (SELECT count(*)::int FROM users WHERE banned_at IS NOT NULL) AS banned,
                  (SELECT count(*)::int FROM groups WHERE bot_status = 'removed') AS removed,
                  (SELECT count(*)::int FROM group_identity_history) AS migrated,
                  (SELECT count(DISTINCT status)::int FROM ghost_batches WHERE is_sample) AS batch_states,
                  (SELECT count(*)::int FROM outbox WHERE status = 'dead') AS dead_messages,
-                 (SELECT count(*)::int FROM job_runs WHERE status = 'failed') AS failed_runs`,
+                 (SELECT count(*)::int FROM job_runs WHERE status = 'failed') AS failed_runs,
+                 (SELECT count(*)::int FROM groups WHERE disabled_at IS NOT NULL) AS disabled_groups,
+                 (SELECT count(*)::int FROM group_migrations WHERE status = 'conflict') AS conflicts`,
     );
     expect(cases).toEqual({
       banned: 1,
@@ -184,6 +186,8 @@ describe('sample data', () => {
       batch_states: 3,
       dead_messages: 1,
       failed_runs: 1,
+      disabled_groups: 1,
+      conflicts: 1,
     });
     const [ban] = await rows<{ ban_reason: string }>(
       sql`SELECT ban_reason FROM users WHERE banned_at IS NOT NULL`,

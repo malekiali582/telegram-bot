@@ -11,7 +11,7 @@ import {
   settlements,
   wallets,
 } from '@lulu/database';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, lt, or } from 'drizzle-orm';
 import type { DomainContext } from './context.ts';
 import { lockKey } from './players.ts';
 
@@ -117,4 +117,39 @@ export async function groupBuffs(ex: Executor, groupId: number): Promise<GroupBu
     huntHasteLevel: level('hunt_haste'),
     huntingGroundLevel: ground.level,
   };
+}
+
+/** How long a disabled group waits between two «this group is disabled» replies. */
+export const DISABLED_NOTICE_INTERVAL_MS = 10 * 60_000;
+
+/**
+ * Whether the bot may run commands in a group. A disabled group (set by an admin in the
+ * panel) runs nothing; `notify` is true at most once every 10 minutes per group, so the
+ * bot can say why without answering every message.
+ */
+export async function groupGate(
+  ex: Executor,
+  groupId: number,
+  now: Date,
+): Promise<{ disabled: false } | { disabled: true; notify: boolean }> {
+  const [row] = await ex
+    .select({ disabledAt: groups.disabledAt })
+    .from(groups)
+    .where(eq(groups.id, groupId));
+  if (!row || row.disabledAt === null) return { disabled: false };
+  const claimed = await ex
+    .update(groups)
+    .set({ disabledNoticeAt: now })
+    .where(
+      and(
+        eq(groups.id, groupId),
+        isNotNull(groups.disabledAt),
+        or(
+          isNull(groups.disabledNoticeAt),
+          lt(groups.disabledNoticeAt, new Date(now.getTime() - DISABLED_NOTICE_INTERVAL_MS)),
+        ),
+      ),
+    )
+    .returning({ id: groups.id });
+  return { disabled: true, notify: claimed.length > 0 };
 }

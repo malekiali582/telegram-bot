@@ -434,6 +434,31 @@ export async function seedSampleData(db: Database, options: SeedOptions): Promis
     options.onProgress?.(day + 1, options.days + 1);
   }
 
+  // A migration conflict (the new chat id already belongs to a city with data) and a
+  // group an admin disabled, for the groups pages. After the activity, so nothing that
+  // happened earlier depends on them.
+  const telegramGroups = groupsOn('telegram');
+  const busy = telegramGroups[0];
+  const conflicting = telegramGroups.at(-1);
+  if (busy && conflicting && conflicting !== busy) {
+    clock.current = new Date(options.now.getTime() - 3 * 3_600_000);
+    await migrateGroupChat(ctx, {
+      platform: 'telegram',
+      fromChatId: conflicting.chatId,
+      toChatId: busy.chatId,
+    });
+  }
+  const disabled = groupsOn('rubika')[0];
+  if (disabled) {
+    await db
+      .update(groups)
+      .set({
+        disabledAt: new Date(options.now.getTime() - 2 * 3_600_000),
+        disabledReason: `${SAMPLE_PREFIX}تبلیغات مکرر در گروه`,
+      })
+      .where(eq(groups.id, disabled.groupId));
+  }
+
   // One banned player (the reason is labelled too).
   const banned = players.find((p) => p.userId !== 0 && p.profile === 'low');
   if (banned) {

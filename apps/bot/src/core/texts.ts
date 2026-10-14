@@ -49,6 +49,9 @@ const minutes = (seconds: number) => fa(Math.round(seconds / 60));
 export const T = {
   // ── general ──
   banned: 'حساب شما در بازی مسدود است.',
+  groupDisabled:
+    '⏸️ «لولو» در این گروه موقتاً غیرفعال است و دستورهای بازی اینجا اجرا نمی‌شوند. داده‌های گروه و بازیکن‌ها سر جایش می‌ماند.',
+  groupDisabledButton: 'بازی در این گروه موقتاً غیرفعال است.',
   groupOnly:
     'این کار فقط داخل گروه انجام می‌شود. ربات را به گروه اضافه کنید و همان‌جا امتحان کنید.',
   anonymousAdmin:

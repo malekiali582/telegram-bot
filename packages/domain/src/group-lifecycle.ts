@@ -5,6 +5,7 @@ import {
   ghostEncounters,
   groupIdentities,
   groupIdentityHistory,
+  groupMigrations,
   groups,
   huntingGrounds,
   inTransaction,
@@ -157,6 +158,19 @@ export async function migrateGroupChat(
     let absorbedGroupId: number | null = null;
     if (existingTarget !== undefined && existingTarget !== groupId) {
       if (!(await isPristine(tx, existingTarget))) {
+        // Recorded for the admin panel; a redelivered update adds no second open row.
+        await tx
+          .insert(groupMigrations)
+          .values({
+            platform,
+            fromChatId,
+            toChatId,
+            groupId,
+            status: 'conflict',
+            otherGroupId: existingTarget,
+            detectedAt: now,
+          })
+          .onConflictDoNothing();
         return { status: 'conflict' as const, groupId, otherGroupId: existingTarget };
       }
       await absorbPristine(tx, existingTarget, groupId);
@@ -189,6 +203,15 @@ export async function migrateGroupChat(
         ),
       );
     await tx.update(groups).set({ updatedAt: now }).where(eq(groups.id, groupId));
+    await tx.insert(groupMigrations).values({
+      platform,
+      fromChatId,
+      toChatId,
+      groupId,
+      status: 'migrated',
+      absorbedGroupId,
+      detectedAt: now,
+    });
     return { status: 'migrated' as const, groupId, absorbedGroupId };
   });
 }

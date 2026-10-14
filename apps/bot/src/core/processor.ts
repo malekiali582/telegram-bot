@@ -4,6 +4,7 @@ import {
   botRemovedFromGroup,
   findGroupIdByChat,
   findUserIdByIdentity,
+  groupGate,
   memberLeftGroup,
   migrateGroupChat,
   noteGroupPresence,
@@ -215,7 +216,16 @@ async function processText(deps: BotDeps, event: TextMessageEvent): Promise<Proc
       return [];
     }
     const groupId = inGroup ? await groupOf(ctx, event.chat, event.platform) : null;
-    if (groupId !== null) await noteGroupPresence(ctx, { groupId, userId: registered.userId });
+    if (groupId !== null) {
+      // An admin disabled this group in the panel: no command runs here; the bot says
+      // so at most every 10 minutes.
+      const gate = await groupGate(ctx.db, groupId, ctx.clock.now());
+      if (gate.disabled) {
+        deps.log.debug('group disabled; command not run', { updateId: event.updateId, groupId });
+        return gate.notify ? [send(conv, T.groupDisabled)] : [];
+      }
+      await noteGroupPresence(ctx, { groupId, userId: registered.userId });
+    }
     const h: HandlerContext = {
       ctx,
       conv,
@@ -262,6 +272,13 @@ async function processButton(deps: BotDeps, event: ButtonClickEvent): Promise<Pr
     : undefined;
 
   return inUpdate(deps, event, async (ctx) => {
+    // Buttons of a disabled group do nothing and stay unused.
+    if (isGroupChat(event.chat)) {
+      const groupId = await findGroupIdByChat(ctx.db, event.platform, event.chat.platformChatId);
+      if (groupId !== undefined && (await groupGate(ctx.db, groupId, ctx.clock.now())).disabled) {
+        return [answer(conv, event.callbackId, T.groupDisabledButton, true)];
+      }
+    }
     const userId = await findUserIdByIdentity(ctx.db, event.platform, event.sender.platformUserId);
     const claim = await claimButton(ctx.db, {
       token,

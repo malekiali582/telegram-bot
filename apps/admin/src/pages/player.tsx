@@ -424,7 +424,12 @@ export function PlayerPage() {
                 <li key={g.groupId} className="rounded-lg bg-raised px-3 py-2">
                   <div className="flex flex-wrap items-center gap-2">
                     {g.platform ? <PlatformBadge platform={g.platform} /> : null}
-                    <span className="font-medium">{g.title}</span>
+                    <Link
+                      to={`/groups/${g.groupId}`}
+                      className="font-medium text-accent hover:underline"
+                    >
+                      {g.title}
+                    </Link>
                     {g.status === 'left' ? <span className="text-xs text-faint">رفته</span> : null}
                     {!g.botPresent ? (
                       <span className="text-xs text-faint">ربات حذف شده</span>

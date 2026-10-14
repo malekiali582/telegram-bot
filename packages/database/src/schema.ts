@@ -65,6 +65,11 @@ export const groups = pgTable('groups', {
   botRemovedAt: instant('bot_removed_at'),
   /** Development sample data (`npm run dev:panel`); never set in production. */
   isSample: boolean('is_sample').notNull().default(false),
+  /** Set by an admin: the bot runs no command here (migration 0010). */
+  disabledAt: instant('disabled_at'),
+  disabledReason: text('disabled_reason'),
+  /** Last «this group is disabled» reply, to say it at most every 10 minutes. */
+  disabledNoticeAt: instant('disabled_notice_at'),
   createdAt: instant('created_at').notNull().defaultNow(),
   updatedAt: instant('updated_at').notNull().defaultNow(),
 });
@@ -512,6 +517,22 @@ export const auditLogs = pgTable('audit_logs', {
   details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
   requestId: text('request_id'),
   createdAt: instant('created_at').notNull().defaultNow(),
+});
+
+/** Every supergroup migration the bot saw, with conflicts left for an admin (0010). */
+export const groupMigrations = pgTable('group_migrations', {
+  id: id(),
+  platform: text('platform').$type<Platform>().notNull(),
+  fromChatId: text('from_chat_id').notNull(),
+  toChatId: text('to_chat_id').notNull(),
+  groupId: ref('group_id').notNull(),
+  status: text('status').$type<'migrated' | 'conflict'>().notNull(),
+  otherGroupId: ref('other_group_id'),
+  absorbedGroupId: ref('absorbed_group_id'),
+  detectedAt: instant('detected_at').notNull(),
+  reviewedAt: instant('reviewed_at'),
+  reviewedByAdminId: ref('reviewed_by_admin_id'),
+  reviewNote: text('review_note'),
 });
 
 /** Liveness of each bot and worker process (migration 0008). */

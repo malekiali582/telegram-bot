@@ -362,3 +362,118 @@ export interface BanRequest {
   banned: boolean;
   reason: string;
 }
+
+// ───────────────────────── groups (8.4) ─────────────────────────
+
+export interface GroupListItemView {
+  id: number;
+  /** Untrusted display text. */
+  title: string;
+  isSample: boolean;
+  platform: PlatformName | null;
+  chatId: string | null;
+  botPresent: boolean;
+  disabledAt: Instant | null;
+  createdAt: Instant;
+  cityLevel: number;
+  bloodBank: Centi;
+  members: number;
+  activeMembers: number;
+  lastActivityAt: Instant | null;
+  previousChatIds: number;
+}
+
+export interface GroupListView {
+  items: GroupListItemView[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface GroupMigrationItemView {
+  id: number;
+  platform: PlatformName;
+  fromChatId: string;
+  toChatId: string;
+  groupId: number;
+  groupTitle: string;
+  status: 'migrated' | 'conflict';
+  otherGroup: { id: number; title: string } | null;
+  absorbedGroupId: number | null;
+  detectedAt: Instant;
+  review: { at: Instant; adminUsername: string; note: string | null } | null;
+}
+
+export interface GroupDetailView {
+  group: {
+    id: number;
+    title: string;
+    isSample: boolean;
+    botPresent: boolean;
+    botAddedAt: Instant;
+    botRemovedAt: Instant | null;
+    createdAt: Instant;
+    disabledAt: Instant | null;
+    disabledReason: string | null;
+  };
+  identity: { platform: PlatformName; chatId: string; since: Instant } | null;
+  previousChatIds: { platform: PlatformName; chatId: string; replacedAt: Instant }[];
+  city: {
+    level: number;
+    maxLevel: number;
+    population: { active: number; windowDays: number; requiredForNext: number | null };
+    huntStore: {
+      points: number;
+      donatedTotal: number;
+      donatedByFood: (NamedKind & { count: number })[];
+    };
+    bloodBank: { balance: Centi; level: number; donatedTotal: Centi };
+    huntingGround: { level: number; maxForBank: number };
+    curses: (NamedKind & { level: number; maxForBank: number })[];
+    next: {
+      city: { level: number; bloodBankCost: Centi; huntPointsCost: number } | null;
+      bloodBank: { level: number; cost: Centi } | null;
+      huntingGround: { level: number; cost: Centi } | null;
+    };
+  };
+  members: {
+    total: number;
+    active: number;
+    left: number;
+    /** At most 200, active first. */
+    list: {
+      userId: number;
+      displayName: string;
+      status: 'member' | 'left';
+      banned: boolean;
+      joinedAt: Instant;
+      lastSuccessAt: Instant | null;
+      active: boolean;
+    }[];
+  };
+  leaderboard: {
+    rank: number;
+    userId: number;
+    displayName: string;
+    points: Centi;
+    levelName: string;
+  }[];
+  migrations: GroupMigrationItemView[];
+}
+
+export interface DisableGroupRequest {
+  disabled: boolean;
+  reason: string;
+}
+
+export interface MigrationOverviewView {
+  openConflicts: GroupMigrationItemView[];
+  recent: GroupMigrationItemView[];
+  groupsWithPreviousIds: {
+    groupId: number;
+    title: string;
+    platform: PlatformName | null;
+    chatId: string | null;
+    previous: { chatId: string; replacedAt: Instant }[];
+  }[];
+}

@@ -27,3 +27,4 @@ export * from './dashboard.ts';
 export * from './admin-players.ts';
 export * from './transactions-query.ts';
 export * from './pending-income.ts';
+export * from './admin-groups.ts';

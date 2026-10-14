@@ -52,7 +52,11 @@ function Row({ t, showDelta }: { t: TransactionView; showDelta: boolean }) {
               {t.user.displayName}
             </Link>
           ) : null}
-          {t.group ? <span>{t.group.title}</span> : null}
+          {t.group ? (
+            <Link to={`/groups/${t.group.id}`} className="hover:underline">
+              {t.group.title}
+            </Link>
+          ) : null}
           {t.admin ? <span>مدیر: {t.admin.username}</span> : null}
         </div>
         {t.reason ? (

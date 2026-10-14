@@ -9,6 +9,9 @@ import { loggedOutReason, useSession } from './lib/session.ts';
 import type { NavItem } from './nav.ts';
 import { navFor } from './nav.ts';
 import { DashboardPage } from './pages/dashboard.tsx';
+import { GroupMigrationsPage } from './pages/group-migrations.tsx';
+import { GroupPage } from './pages/group.tsx';
+import { GroupsPage } from './pages/groups.tsx';
 import { PlayerPage } from './pages/player.tsx';
 import { PlayersPage } from './pages/players.tsx';
 import { LoginPage } from './pages/login.tsx';
@@ -22,6 +25,7 @@ function pageFor(item: NavItem, session: SessionView) {
   if (item.path === '/system') return <SystemPage session={session} />;
   if (item.path === '/players') return <PlayersPage />;
   if (item.path === '/transactions') return <TransactionsPage />;
+  if (item.path === '/groups') return <GroupsPage />;
   return <ComingSoon item={item} />;
 }
 
@@ -36,6 +40,8 @@ export function routesFor(session: SessionView): RouteObject[] {
           element: pageFor(item, session),
         })),
         { path: 'players/:id', element: <PlayerPage /> },
+        { path: 'groups/migrations', element: <GroupMigrationsPage /> },
+        { path: 'groups/:id', element: <GroupPage /> },
         { path: '*', element: <NotFound /> },
       ],
     },
