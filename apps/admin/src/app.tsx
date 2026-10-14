@@ -9,6 +9,7 @@ import { loggedOutReason, useSession } from './lib/session.ts';
 import type { NavItem } from './nav.ts';
 import { navFor } from './nav.ts';
 import { DashboardPage } from './pages/dashboard.tsx';
+import { EconomyPage } from './pages/economy.tsx';
 import { GroupMigrationsPage } from './pages/group-migrations.tsx';
 import { GroupPage } from './pages/group.tsx';
 import { GroupsPage } from './pages/groups.tsx';
@@ -26,6 +27,7 @@ function pageFor(item: NavItem, session: SessionView) {
   if (item.path === '/players') return <PlayersPage />;
   if (item.path === '/transactions') return <TransactionsPage />;
   if (item.path === '/groups') return <GroupsPage />;
+  if (item.path === '/economy') return <EconomyPage session={session} />;
   return <ComingSoon item={item} />;
 }
 

@@ -477,3 +477,90 @@ export interface MigrationOverviewView {
     previous: { chatId: string; replacedAt: Instant }[];
   }[];
 }
+
+// ───────────────────────── economy settings (8.5) ─────────────────────────
+
+export type ConfigLabelName = 'fixed' | 'suggested';
+
+/** One editable value of the game configuration, described from its schema. */
+export interface ConfigFieldView {
+  /** e.g. `levels[2].upgradeCost` */
+  path: string;
+  /** Top-level section key, e.g. `levels`. */
+  section: string;
+  label: ConfigLabelName;
+  /** Persian: what the value means (from the fixed/suggested rules). */
+  description: string;
+  /** Persian: which item it belongs to, e.g. «سطح ۳» or «چاقو»; empty when obvious. */
+  context: string;
+  /** Section of the specification it comes from. */
+  source: string;
+  kind: 'integer' | 'choice';
+  min?: number;
+  max?: number;
+  /** `choice` fields; `null` is offered when `nullable`. */
+  options?: { value: string; name: string }[];
+  nullable: boolean;
+  /** Structural values (level numbers, «no cost on the last level») are shown, not edited. */
+  readOnly: boolean;
+  /** Basis points: 100 bp = 1 %. */
+  basisPoints: boolean;
+  value: number | string | null;
+}
+
+export interface ConfigFormView {
+  versionId: number;
+  effectiveFrom: Instant;
+  source: 'default' | 'panel';
+  note: string;
+  createdBy: string | null;
+  sections: { key: string; title: string; fields: ConfigFieldView[] }[];
+  /** The whole document, to send back edited. */
+  config: Record<string, unknown>;
+}
+
+export interface ConfigChangeView {
+  path: string;
+  label: ConfigLabelName;
+  description: string;
+  context: string;
+  before: unknown;
+  after: unknown;
+}
+
+export type ConfigPreviewView =
+  | { status: 'invalid'; issues: { path: string; message: string }[] }
+  | { status: 'ok'; baseVersionId: number; changes: ConfigChangeView[]; needsOwner: boolean };
+
+export interface SaveConfigRequest {
+  config: Record<string, unknown>;
+  note: string;
+  baseVersionId: number;
+  /** Required when an owner rule changes (owner only). */
+  password?: string;
+}
+
+export interface ConfigVersionView {
+  id: number;
+  source: 'default' | 'panel';
+  note: string;
+  effectiveFrom: Instant;
+  createdBy: string | null;
+  ownerApprovedBy: string | null;
+  changeCount: number;
+  ownerRulesChanged: boolean;
+  current: boolean;
+}
+
+export interface ConfigVersionDetailView extends Omit<
+  ConfigVersionView,
+  'changeCount' | 'ownerRulesChanged' | 'current'
+> {
+  changes: ConfigChangeView[];
+}
+
+export interface RollbackConfigRequest {
+  note: string;
+  baseVersionId: number;
+  password?: string;
+}

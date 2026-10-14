@@ -7,6 +7,7 @@ import { PASSWORD_MAX_LENGTH } from '../auth/password.ts';
 import { csrfTokenFor, revokeSession, sha256 } from '../auth/sessions.ts';
 import type { AdminUserView, SessionView } from '../contract.ts';
 import { ApiError, parseInput } from '../errors.ts';
+import { waitText } from '../wait-text.ts';
 
 const loginBody = z.object({
   username: z.string().min(1).max(64),
@@ -15,16 +16,6 @@ const loginBody = z.object({
     .min(1)
     .max(PASSWORD_MAX_LENGTH * 4),
 });
-
-const faNumber = new Intl.NumberFormat('fa-IR');
-
-/** «۳ دقیقه» or «۴۵ ثانیه», rounded up. */
-export function waitText(ms: number): string {
-  const seconds = Math.max(1, Math.ceil(ms / 1000));
-  return seconds < 60
-    ? `${faNumber.format(seconds)} ثانیه`
-    : `${faNumber.format(Math.ceil(seconds / 60))} دقیقه`;
-}
 
 export const authRoutes: FastifyPluginCallback<{ deps: ApiDeps }> = (app, { deps }, done) => {
   const { ctx } = deps;

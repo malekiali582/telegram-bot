@@ -13,6 +13,7 @@ import type { ApiErrorBody, AppInfo, RouteAccess } from './contract.ts';
 import { CSRF_HEADER } from './contract.ts';
 import { ApiError, codeForStatus, errorMessage } from './errors.ts';
 import { authRoutes } from './routes/auth.ts';
+import { configRoutes } from './routes/config.ts';
 import { dashboardRoutes } from './routes/dashboard.ts';
 import { groupRoutes } from './routes/groups.ts';
 import { healthRoutes } from './routes/health.ts';
@@ -244,5 +245,6 @@ export async function buildApi(
   await app.register(playerRoutes, { deps });
   await app.register(transactionRoutes, { deps });
   await app.register(groupRoutes, { deps });
+  await app.register(configRoutes, { deps });
   return { app, routes };
 }

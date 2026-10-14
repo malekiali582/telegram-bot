@@ -4,13 +4,12 @@ import { auditLogs } from '@lulu/database';
 import type { FastifyPluginCallback, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ApiDeps } from '../app.ts';
-import { confirmPassword, loginPolicy } from '../auth/login.ts';
 import { PASSWORD_MAX_LENGTH } from '../auth/password.ts';
+import { requirePassword } from '../auth/reauth.ts';
 import { BackupError, createBackup, isBackupFileName, listBackups } from '../backup.ts';
 import type { BackupCreatedView, BackupView, SystemView } from '../contract.ts';
 import { ApiError, parseInput } from '../errors.ts';
 import { systemStatus, retryDeadMessage } from '../system.ts';
-import { waitText } from './auth.ts';
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 const nameParam = z.object({ name: z.string().refine(isBackupFileName) });
@@ -40,27 +39,6 @@ export const systemRoutes: FastifyPluginCallback<{ deps: ApiDeps }> = (app, { de
       requestId: request.id,
       createdAt: ctx.clock.now(),
     });
-
-  /** The owner retypes their password; limited and recorded like a login. */
-  const requirePassword = async (request: FastifyRequest) => {
-    const { password } = parseInput(passwordBody, request.body);
-    const now = ctx.clock.now();
-    const { config } = await ctx.config.effectiveAt(ctx.db, now);
-    const result = await confirmPassword(ctx.db, {
-      username: request.session!.admin.username,
-      password,
-      ip: request.ip,
-      now,
-      policy: loginPolicy(config),
-    });
-    if (result.status === 'locked') {
-      throw new ApiError('too_many_attempts', {
-        message: `تلاش‌های ناموفق زیاد بود. ${waitText(result.retryAfterMs)} دیگر دوباره امتحان کنید.`,
-        retryAfterSeconds: Math.ceil(result.retryAfterMs / 1000),
-      });
-    }
-    if (result.status === 'wrong_password') throw new ApiError('wrong_password');
-  };
 
   const backupDir = () => {
     if (!deps.backups) {
@@ -110,7 +88,8 @@ export const systemRoutes: FastifyPluginCallback<{ deps: ApiDeps }> = (app, { de
     { config: { access: 'owner' } },
     async (request): Promise<BackupCreatedView> => {
       const { dir, keep } = backupDir();
-      await requirePassword(request);
+      const { password } = parseInput(passwordBody, request.body);
+      await requirePassword(deps, request, password);
       try {
         const created = await createBackup(ctx.db, { dir, keep, now: ctx.clock.now() });
         await audit(
