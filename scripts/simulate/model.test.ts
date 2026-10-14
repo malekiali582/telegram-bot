@@ -50,4 +50,33 @@ describe('economy simulation', () => {
     const r = run(5, 4, 2);
     for (const day of r.ghostsHeardPerDay) expect(day).toBeLessThanOrEqual(3 * r.groupSize);
   });
+
+  it('accepts what-if interest rules and extra purchases, and is unchanged without them', () => {
+    const base = run(5, 6, 4);
+    expect(
+      simulate(DEFAULT_GAME_CONFIG, {
+        seed: 5,
+        days: 4,
+        mix: groupMix(6),
+        interestCenti: (t) =>
+          Math.floor((t * DEFAULT_GAME_CONFIG.treasury.dailyInterestBp) / 10_000),
+      }),
+    ).toEqual(base);
+    const noInterest = simulate(DEFAULT_GAME_CONFIG, {
+      seed: 5,
+      days: 4,
+      mix: groupMix(6),
+      interestCenti: () => 0,
+    });
+    for (const p of noInterest.players) expect(p.days.at(-1)!.earned.interest).toBe(0);
+    const withSink = simulate(DEFAULT_GAME_CONFIG, {
+      seed: 5,
+      days: 4,
+      mix: groupMix(6),
+      extraGoals: [{ id: 'trinket', cost: 50 }],
+    });
+    const spentTools = (r: typeof base) =>
+      r.players.reduce((a, p) => a + p.days.at(-1)!.spent.tool, 0);
+    expect(spentTools(withSink)).toBeGreaterThan(spentTools(base));
+  });
 });

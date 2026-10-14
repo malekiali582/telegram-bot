@@ -129,6 +129,7 @@ interface State {
   firstLoloDay: number | null;
   earned: Record<Source, number>;
   spent: Record<Sink, number>;
+  extraBought: Set<string>;
   record: SimPlayer;
 }
 
@@ -148,10 +149,24 @@ function dailySessions(p: Profile, rng: SeededRng): { start: number; end: number
   });
 }
 
-export function simulate(
-  config: GameConfig,
-  options: { seed: number; days: number; mix: ProfileId[] },
-): SimResult {
+export interface SimOptions {
+  seed: number;
+  days: number;
+  mix: ProfileId[];
+  /**
+   * What-if only: nightly interest in centi for a treasury balance in centi, instead of
+   * `treasury.dailyInterestBp` (e.g. a cap or tiers the game does not have).
+   */
+  interestCenti?: (treasuryCenti: number) => number;
+  /**
+   * What-if only: extra things to buy once each, with a price and no effect, to measure
+   * how much spending a new sink would absorb. Bought like any other goal (cheapest
+   * first) and booked as tool spending.
+   */
+  extraGoals?: { id: string; cost: number }[];
+}
+
+export function simulate(config: GameConfig, options: SimOptions): SimResult {
   const rng = new SeededRng(options.seed);
   const c = config;
   const states: State[] = options.mix.map((id) => {
@@ -178,6 +193,7 @@ export function simulate(
       firstLoloDay: null,
       earned: zero(SOURCES),
       spent: zero(SINKS),
+      extraBought: new Set<string>(),
       record: { profile: id, levelDay: [], toolDay: {}, cemeteryDay: null, days: [] },
     };
   });
@@ -243,6 +259,10 @@ export function simulate(
           buy: () => s.cemetery!++,
         });
       }
+      for (const extra of options.extraGoals ?? []) {
+        if (s.extraBought.has(extra.id)) continue;
+        goals.push({ cost: extra.cost, sink: 'tool', buy: () => s.extraBought.add(extra.id) });
+      }
       goals.sort((a, b) => a.cost - b.cost);
       const goal = goals[0];
       if (!goal) return;
@@ -269,7 +289,9 @@ export function simulate(
       ghostsHeardPerDay.push(0);
       for (const s of states) {
         // Tehran midnight: 3 % of the treasury, then the daily ghost counters reset.
-        const interest = Math.floor((s.treasury * c.treasury.dailyInterestBp) / BP_SCALE);
+        const interest = options.interestCenti
+          ? options.interestCenti(s.treasury)
+          : Math.floor((s.treasury * c.treasury.dailyInterestBp) / BP_SCALE);
         s.treasury += interest;
         s.earned.interest += interest;
         s.ghostAttempts = 0;
