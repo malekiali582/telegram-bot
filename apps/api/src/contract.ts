@@ -626,3 +626,69 @@ export type AddGhostBatchView =
   | { status: 'already_imported'; batchId: string }
   /** Persian reasons: for the date, for each text (null when fine) and for the form. */
   | { status: 'invalid'; activeDate: string | null; texts: (string | null)[]; form: string | null };
+
+// ───────────────────────── announcements (8.7) ─────────────────────────
+
+export type AnnouncementTargetRequest = { kind: 'all_groups' } | { kind: 'group'; groupId: number };
+
+export interface AnnouncementRecipientsView {
+  count: number;
+  byPlatform: { platform: PlatformName; count: number }[];
+  /** A few recipient names, for the preview. */
+  sample: string[];
+  /** Groups left out: disabled (only for «every group»), bot removed, no enabled platform. */
+  skipped: { disabled: number; botRemoved: number; otherPlatform: number };
+  maxLength: number;
+}
+
+export interface SendAnnouncementRequest {
+  target: AnnouncementTargetRequest;
+  text: string;
+  /** Delivered without a notification sound. */
+  silent: boolean;
+}
+
+export interface DeliveryCountsView {
+  total: number;
+  pending: number;
+  sent: number;
+  failed: number;
+  cancelled: number;
+}
+
+export interface AnnouncementView {
+  id: number;
+  text: string;
+  target: 'all_groups' | 'group';
+  group: { id: number; title: string } | null;
+  silent: boolean;
+  createdBy: string | null;
+  createdAt: Instant;
+  cancelledAt: Instant | null;
+  cancelledBy: string | null;
+  counts: DeliveryCountsView;
+  lastSentAt: Instant | null;
+}
+
+export interface AnnouncementListView {
+  items: AnnouncementView[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface AnnouncementDeliveryView {
+  groupId: number | null;
+  title: string | null;
+  platform: PlatformName;
+  chatId: string;
+  status: 'pending' | 'sent' | 'dead' | 'cancelled';
+  attempts: number;
+  lastError: string | null;
+  sentAt: Instant | null;
+  nextAttemptAt: Instant;
+}
+
+export interface AnnouncementDetailView extends AnnouncementView {
+  deliveries: AnnouncementDeliveryView[];
+}

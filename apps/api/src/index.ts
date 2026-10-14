@@ -7,3 +7,4 @@ export * from './auth/login.ts';
 export * from './auth/password.ts';
 export * from './auth/sessions.ts';
 export * from './backup.ts';
+export * from './announcements.ts';

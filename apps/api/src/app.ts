@@ -12,6 +12,7 @@ import { findActiveSession, safeEqual, sha256 } from './auth/sessions.ts';
 import type { ApiErrorBody, AppInfo, RouteAccess } from './contract.ts';
 import { CSRF_HEADER } from './contract.ts';
 import { ApiError, codeForStatus, errorMessage } from './errors.ts';
+import { announcementRoutes } from './routes/announcements.ts';
 import { authRoutes } from './routes/auth.ts';
 import { configRoutes } from './routes/config.ts';
 import { dashboardRoutes } from './routes/dashboard.ts';
@@ -248,5 +249,6 @@ export async function buildApi(
   await app.register(groupRoutes, { deps });
   await app.register(configRoutes, { deps });
   await app.register(ghostRoutes, { deps });
+  await app.register(announcementRoutes, { deps });
   return { app, routes };
 }

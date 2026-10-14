@@ -8,6 +8,7 @@ import { ErrorState, Loading } from './components/states.tsx';
 import { loggedOutReason, useSession } from './lib/session.ts';
 import type { NavItem } from './nav.ts';
 import { navFor } from './nav.ts';
+import { AnnouncementsPage } from './pages/announcements.tsx';
 import { DashboardPage } from './pages/dashboard.tsx';
 import { EconomyPage } from './pages/economy.tsx';
 import { GhostsPage } from './pages/ghosts.tsx';
@@ -30,6 +31,7 @@ function pageFor(item: NavItem, session: SessionView) {
   if (item.path === '/groups') return <GroupsPage />;
   if (item.path === '/economy') return <EconomyPage session={session} />;
   if (item.path === '/ghosts') return <GhostsPage />;
+  if (item.path === '/announcements') return <AnnouncementsPage />;
   return <ComingSoon item={item} />;
 }
 

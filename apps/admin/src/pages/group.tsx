@@ -1,6 +1,6 @@
 import type { GroupDetailView, GroupMigrationItemView } from '@lulu/api/contract';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowRight, CirclePause, CirclePlay } from 'lucide-react';
+import { ArrowRight, CirclePause, CirclePlay, Megaphone } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router';
@@ -255,6 +255,15 @@ export function GroupPage() {
           )}
           {d.group.disabledAt ? 'فعال کردن گروه' : 'غیرفعال کردن گروه'}
         </button>
+        {d.group.botPresent ? (
+          <Link
+            to={`/announcements?group=${d.group.id}`}
+            className="ms-2 inline-flex items-center gap-2 rounded-lg border border-line px-3 py-1.5 text-sm hover:bg-raised"
+          >
+            <Megaphone aria-hidden className="size-4" />
+            ارسال اطلاعیه به این گروه
+          </Link>
+        ) : null}
         {open ? (
           <DisableForm
             group={d.group}

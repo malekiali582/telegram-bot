@@ -39,6 +39,7 @@ describe(`migrations (${testBackend()})`, () => {
       '0009_settlement_interval',
       '0010_group_admin',
       '0011_ghost_lookahead',
+      '0012_announcements',
     ]);
     expect(checksum('a\r\nb')).toBe(checksum('a\nb'));
   });
@@ -59,6 +60,7 @@ describe(`migrations (${testBackend()})`, () => {
       '0009_settlement_interval',
       '0010_group_admin',
       '0011_ghost_lookahead',
+      '0012_announcements',
     ]);
     expect(await migrateDatabase(t)).toEqual({ applied: [] });
   });

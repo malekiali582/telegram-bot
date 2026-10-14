@@ -434,7 +434,10 @@ export const outbox = pgTable('outbox', {
   platform: text('platform').$type<Platform>().notNull(),
   kind: text('kind').$type<'send' | 'edit' | 'answer_button'>().notNull(),
   payload: jsonb('payload').notNull(),
-  status: text('status').$type<'pending' | 'sent' | 'dead'>().notNull().default('pending'),
+  status: text('status')
+    .$type<'pending' | 'sent' | 'dead' | 'cancelled'>()
+    .notNull()
+    .default('pending'),
   attempts: integer('attempts').notNull().default(0),
   nextAttemptAt: instant('next_attempt_at').notNull().defaultNow(),
   lastError: text('last_error'),
@@ -443,6 +446,22 @@ export const outbox = pgTable('outbox', {
   dedupeKey: text('dedupe_key'),
   createdAt: instant('created_at').notNull().defaultNow(),
   sentAt: instant('sent_at'),
+  /** Set for the messages of an announcement from the panel (0012). */
+  announcementId: ref('announcement_id'),
+});
+
+/** An admin's message to every group or to one group (0012); delivered via the outbox. */
+export const announcements = pgTable('announcements', {
+  id: id(),
+  text: text('text').notNull(),
+  target: text('target').$type<'all_groups' | 'group'>().notNull(),
+  groupId: ref('group_id'),
+  silent: boolean('silent').notNull().default(false),
+  recipients: integer('recipients').notNull(),
+  createdByAdminId: ref('created_by_admin_id').notNull(),
+  createdAt: instant('created_at').notNull().defaultNow(),
+  cancelledAt: instant('cancelled_at'),
+  cancelledByAdminId: ref('cancelled_by_admin_id'),
 });
 
 export const pendingConfirmations = pgTable('pending_confirmations', {

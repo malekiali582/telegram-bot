@@ -78,7 +78,9 @@ export function workerJobs(ctx: DomainContext): JobDefinition[] {
             sql`DELETE FROM pending_confirmations WHERE expires_at < ${iso(86_400_000)}::timestamptz RETURNING 1`,
           ),
           outbox: await count(
-            sql`DELETE FROM outbox WHERE status = 'sent' AND sent_at < ${iso(7 * 86_400_000)}::timestamptz RETURNING 1`,
+            // Announcement messages stay: they are the announcement's delivery record.
+            sql`DELETE FROM outbox WHERE status = 'sent' AND announcement_id IS NULL
+                  AND sent_at < ${iso(7 * 86_400_000)}::timestamptz RETURNING 1`,
           ),
         };
       },
