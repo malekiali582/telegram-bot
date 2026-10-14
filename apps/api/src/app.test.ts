@@ -80,6 +80,7 @@ describe('route access', () => {
     await bad.app.close();
   });
 
+  // Two real (scrypt) logins per route: slow by design, and it grows with every route.
   it('is enforced on the server for every route: anonymous, admin and owner', async () => {
     // A probe route for each level, so the matrix also covers owner-only routes.
     const probe = await createTestApi(game);
@@ -121,7 +122,7 @@ describe('route access', () => {
       expect([401, 403], `${label} owner`).not.toContain((await call(owner)).statusCode);
     }
     await probe.app.close();
-  });
+  }, 120_000);
 });
 
 describe('login', () => {

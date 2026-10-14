@@ -8,7 +8,10 @@ import { ErrorState, Loading } from './components/states.tsx';
 import { loggedOutReason, useSession } from './lib/session.ts';
 import type { NavItem } from './nav.ts';
 import { navFor } from './nav.ts';
+import { AccountPage } from './pages/account.tsx';
+import { AdminsPage } from './pages/admins.tsx';
 import { AnnouncementsPage } from './pages/announcements.tsx';
+import { AuditPage } from './pages/audit.tsx';
 import { DashboardPage } from './pages/dashboard.tsx';
 import { EconomyPage } from './pages/economy.tsx';
 import { GhostsPage } from './pages/ghosts.tsx';
@@ -18,11 +21,11 @@ import { GroupsPage } from './pages/groups.tsx';
 import { PlayerPage } from './pages/player.tsx';
 import { PlayersPage } from './pages/players.tsx';
 import { LoginPage } from './pages/login.tsx';
-import { ComingSoon, NotFound } from './pages/placeholder.tsx';
+import { NotFound } from './pages/placeholder.tsx';
 import { SystemPage } from './pages/system.tsx';
 import { TransactionsPage } from './pages/transactions.tsx';
 
-/** Pages built so far; the rest show which build section delivers them. */
+/** The page for each navigation entry. */
 function pageFor(item: NavItem, session: SessionView) {
   if (item.path === '/') return <DashboardPage />;
   if (item.path === '/system') return <SystemPage session={session} />;
@@ -32,7 +35,10 @@ function pageFor(item: NavItem, session: SessionView) {
   if (item.path === '/economy') return <EconomyPage session={session} />;
   if (item.path === '/ghosts') return <GhostsPage />;
   if (item.path === '/announcements') return <AnnouncementsPage />;
-  return <ComingSoon item={item} />;
+  if (item.path === '/admins') return <AdminsPage />;
+  if (item.path === '/audit') return <AuditPage session={session} />;
+  if (item.path === '/account') return <AccountPage session={session} />;
+  return <NotFound />;
 }
 
 export function routesFor(session: SessionView): RouteObject[] {

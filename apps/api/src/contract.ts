@@ -692,3 +692,75 @@ export interface AnnouncementDeliveryView {
 export interface AnnouncementDetailView extends AnnouncementView {
   deliveries: AnnouncementDeliveryView[];
 }
+
+// ───────────────────────── admins, account and audit log (8.8) ─────────────────────────
+
+export interface AdminListItemView {
+  id: number;
+  username: string;
+  role: AdminRole;
+  createdAt: Instant;
+  /** Set when the account was removed (disabled); it can be enabled again. */
+  disabledAt: Instant | null;
+  lastLoginAt: Instant | null;
+  activeSessions: number;
+  /** The signed-in owner looking at the list. */
+  you: boolean;
+}
+
+export interface CreateAdminRequest {
+  username: string;
+  newPassword: string;
+  role: AdminRole;
+  /** The owner's own password, entered again. */
+  password: string;
+}
+
+export interface SessionItemView {
+  id: string;
+  createdAt: Instant;
+  lastSeenAt: Instant;
+  expiresAt: Instant;
+  ip: string | null;
+  userAgent: string | null;
+  current: boolean;
+}
+
+export interface AccountView {
+  user: AdminUserView;
+  createdAt: Instant;
+  passwordMinLength: number;
+  sessions: SessionItemView[];
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface AuditEntryView {
+  id: number;
+  createdAt: Instant;
+  actor: 'admin' | 'system';
+  admin: { id: number; username: string } | null;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  targetName: string | null;
+  reason: string | null;
+  details: Record<string, unknown>;
+  requestId: string | null;
+}
+
+export interface AuditListView {
+  items: AuditEntryView[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface AuditFiltersView {
+  admins: { id: number; username: string }[];
+  actions: string[];
+  targetTypes: string[];
+}

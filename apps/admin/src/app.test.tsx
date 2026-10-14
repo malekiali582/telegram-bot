@@ -126,6 +126,7 @@ describe('panel frame', () => {
 
   it('shows owner-only pages to the owner, and the development banner in dev:panel', async () => {
     routes['GET /api/auth/session'] = () => ({ status: 200, body: session({}, 'dev-panel') });
+    routes['GET /api/admins'] = () => ({ status: 200, body: [] });
     renderApp('/admins');
     expect(await screen.findByRole('heading', { name: 'مدیران' })).toBeTruthy();
     expect(screen.getByText(/حالت توسعه/)).toBeTruthy();
